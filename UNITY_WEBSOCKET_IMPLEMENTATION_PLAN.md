@@ -1,15 +1,15 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Ready to begin Unity-side development against the currently deployed v2 contract.**
+Status: **Ready to implement and test against the live deployed v2 backend.**
 
-Local end-to-end acceptance still requires a running backend plus a valid development access token and avatar ID. Those items do not block implementation of the modular Unity client.
+The live WebSocket and REST hosts are available. Authenticated end-to-end testing still requires a valid access token and avatar ID (or the exact REST auth/avatar flow to create them).
 
 ## Source-of-truth order
 
 Use sources in this order when details conflict:
 
 1. `Assets/websocket-protocol-spec.docx` — canonical document covering current v2 and proposed 2.1.
-2. Backend developer confirmations recorded on 2026-07-13 in §5.
+2. Backend developer confirmations recorded on 2026-07-13 and 2026-07-14 in §5.
 3. `E:\Downloads\test_ws.sh` — exact current-v2 happy-path wire example.
 4. `synth-cohost-unity-bridge` at commit `ca5bd8a` — exported Rust payload/type reference.
 5. `E:\Downloads\WEBSOCKET_DOCS_SAAD.md` — earlier draft notes; context only.
@@ -24,6 +24,7 @@ Build a modular Unity client that:
 
 - Connects to a complete `ws://` or `wss://` URL configured in one Inspector field.
 - Switches between local and live endpoints by changing only that URL, assuming credentials are valid for the selected environment.
+- Uses `wss://synth-cohost-app.onrender.com/ws` for the current live integration target.
 - Implements the deployed integer `v: 2` envelope.
 - Generates one client session ID per WebSocket connection and includes it on every frame, including auth.
 - Authenticates with a short-lived access token and one avatar UUID.
@@ -51,7 +52,7 @@ Build a modular Unity client that:
 - Message routing.
 - Avatar behavior, AI response, STT, state acknowledgement, and error adapters.
 - Inspector diagnostics.
-- EditMode, PlayMode, local integration, and eventual live/staging verification.
+- EditMode, PlayMode, live integration, and optional local verification.
 - Windows Standalone first, matching the current project target.
 - A transport boundary that permits mobile/WebGL adapters later.
 
@@ -62,7 +63,7 @@ Build a modular Unity client that:
 - Proposed 2.1 wire behavior until it is approved and deployed.
 - `session.ready` and server-generated session IDs in current v2.
 - `heartbeat.ack`.
-- TTS, audio streaming, `speech.*`, lip sync, and visemes.
+- Real microphone speech-to-text, TTS, audio streaming, `speech.*`, lip sync, and visemes. The text-based `stt.final` protocol event remains in scope.
 - Multiple concurrent `stt.final` turns.
 - Session resumption or replay after disconnect.
 - Final avatar art, animation graphs, captions UI, and audio assets that are not present yet.
@@ -86,7 +87,19 @@ This is a greenfield integration, so the module boundaries can be established cl
 
 ### 4.1 Endpoint
 
-Local development:
+Live integration:
+
+```text
+wss://synth-cohost-app.onrender.com/ws
+```
+
+REST/auth/avatar base:
+
+```text
+https://synth-cohost-app.onrender.com
+```
+
+Optional local development:
 
 ```text
 ws://127.0.0.1:8080/ws
@@ -95,7 +108,18 @@ ws://127.0.0.1:8080/ws
 - No special headers.
 - No query parameters have been specified.
 - No WebSocket subprotocol.
-- Live/staging will use the complete supplied `wss://.../ws` URL through the same Inspector field.
+- The live WebSocket endpoint was independently probed without credentials on 2026-07-14: TLS/WebSocket upgrade succeeded while the service was warm. This verifies reachability, not authenticated protocol behavior.
+- The REST host is reachable, but `GET /` returns 404. Do not use the base path as a health check; use a documented REST route when the HTTP contract is supplied.
+
+#### Render free-tier hosting behavior
+
+- The service sleeps after about 15 minutes without activity.
+- The first request/connection after sleep can take up to approximately 50 seconds.
+- This delay occurs while opening the transport, before WebSocket `OnOpen`; it must not be treated as an auth or protocol failure.
+- Use a configurable connection timeout with a 75-second default for this deployment.
+- After 10 seconds of a pending live connection, diagnostics may show `Waking server` while the same single connection attempt continues.
+- Never start parallel connection attempts while a cold-start connection is still pending.
+- The server's 10-second auth deadline begins only after the WebSocket opens; Unity must still send auth immediately on open.
 
 ### 4.2 Envelope
 
@@ -140,6 +164,7 @@ Exact current frame:
 
 - Auth must be the first application frame.
 - Send it immediately after socket open and within the server's 10-second handshake timeout.
+- A Render cold start can delay socket open by approximately 50 seconds; it does not extend or consume the post-open auth deadline.
 - There is no positive auth response and no `session.ready` in current v2.
 - After the auth frame is sent successfully, Unity enters `Ready` provisionally. A rejected auth is reported through `system.error` and/or close 4000/4001.
 - Tokens are short-lived and should be reacquired for a new handshake.
@@ -175,16 +200,16 @@ Exact current frame:
 | Type | Payload | Unity behavior |
 |---|---|---|
 | `avatar.state` | `{ behavior }` | Request a behavior transition through an avatar adapter. |
-| `ai.response` | `{ text, emotion, intent }` | Publish typed response/caption data. Dev responses may use a mock AI provider. |
+| `ai.response` | `{ text, emotion, intent }` | Publish typed response/caption data. The live endpoint uses the real AI/moderation pipeline; local/dev environments may still use a mock provider. |
 | `system.error` | `{ code, message }` | Publish a sanitized error; the connection may remain open or a close may follow. |
 
-Expected happy-path response to `stt.final`:
+The backend confirms the live `stt.final → AI generation → moderation → response` pipeline works end to end. Expected response flow:
 
 1. `avatar.state` with `thinking`.
 2. Another `avatar.state` containing the generated response behavior.
 3. `ai.response` containing text, emotion, and intent.
 
-The final-turn gate is released on `ai.response`, a terminal `system.error`, disconnect, cancellation, or a configurable response timeout. Do not rely on a finalized ordering beyond the one-turn rule.
+The final-turn gate is released on `ai.response`, a terminal `system.error`, disconnect, cancellation, or a configurable response timeout. Do not rely on a finalized ordering beyond the one-turn rule. Live tests must assert valid event shapes/enums and non-empty response text, not deterministic AI wording.
 
 ### 4.7 Current enums
 
@@ -233,7 +258,7 @@ This table belongs in a replaceable reconnect policy so later backend/client sig
 
 ### 4.11 Proposed 2.1 — future only
 
-The DOCX also describes an undeployed proposal:
+The DOCX also describes an undeployed proposal, reconfirmed as pending sign-off on 2026-07-14:
 
 - String `protocol_version` replaces integer `v`.
 - Auth omits `session_id`.
@@ -305,7 +330,22 @@ Files received and reviewed:
 - `E:\Downloads\WEBSOCKET_DOCS_SAAD.md`
 - `E:\Downloads\test_ws.sh`
 
-### 5.6 Final implementation decision
+### 5.6 Live deployment update — 2026-07-14
+
+The backend developer confirmed:
+
+- Live WebSocket: `wss://synth-cohost-app.onrender.com/ws`.
+- Live REST/auth/avatar base: `https://synth-cohost-app.onrender.com`.
+- The deployed protocol remains current v2: integer `v`, client-generated session ID, and no `session.ready`.
+- Render free tier sleeps after approximately 15 minutes idle; the first connection after sleep may take up to approximately 50 seconds.
+- The live text pipeline `stt.final → AI → moderation → response` is wired and working end to end.
+- Real audio speech-to-text and TTS are still pending.
+- Proposed v2.1 remains gated on sign-off.
+- The backend developer will notify Unity when real audio features or v2.1 change status.
+
+An unauthenticated connectivity probe on 2026-07-14 confirmed that the warm live WebSocket accepted a TLS/WebSocket upgrade. The REST host also responded, although its base `/` route returns 404. No token or application frame was sent, so authenticated v2 behavior still requires credentials to verify.
+
+### 5.7 Final implementation decision
 
 Implement one deployed-v2 dialect now. Do not build a hybrid or Inspector toggle between current v2 and proposed 2.1. Isolate protocol/session ownership and reconnect behavior behind interfaces, while keeping avatar, AI-response, STT, and UI code independent.
 
@@ -348,30 +388,33 @@ It confirms the broad v2 envelope, auth/avatar purpose, event names, fixed heart
 | Auth/session/heartbeat logic | Ready. |
 | Single final-turn workflow | Ready. |
 | Avatar/AI/error adapters | Ready. |
-| Local happy-path integration | Ready once a backend and credentials are available. |
+| Live endpoint connectivity | Verified while warm; authenticated test credentials are still required. |
+| Live text/AI/moderation pipeline | Confirmed working by the backend developer. |
+| Local happy-path integration | Optional; requires the full backend workspace and local credentials. |
 | Unity-owned register/login/avatar creation | Needs the exact HTTP API contract if included. |
 | Full close/error acceptance | Needs backend fixtures or manual test cases. |
-| Live/staging verification | Needs live URL and matching credentials later. |
+| Live authenticated verification | Endpoint is known; needs matching credentials/avatar. |
+| Render cold-start behavior | Requirements known; must be tested with a delayed connection and one real idle wake-up. |
 | Proposed 2.1 | Future work; does not block v2. |
 
 ### 6.4 Remaining inputs
 
-No additional answer is required before starting Unity WebSocket development.
+No additional backend answer is required before starting Unity WebSocket development.
 
-Before local end-to-end acceptance, obtain one of these:
+Before authenticated live acceptance, obtain a valid short-lived token and tenant-owned avatar ID, or a test account that can create them through the REST API.
 
-- Access to a running backend at `ws://127.0.0.1:8080/ws`, plus a valid short-lived token and tenant-owned avatar ID; or
-- The full backend workspace/run instructions and prerequisites required to run `test_ws.sh`.
+Local backend access is now optional because a live endpoint exists. If local verification is still desired, obtain the full backend workspace/run instructions and prerequisites required by `test_ws.sh`.
 
 If Unity is expected to own account/avatar provisioning in this milestone, also request:
 
 - HTTP base URL and exact register/login/refresh/`POST /avatars` routes.
 - Request/response JSON and error schemas.
 - Token expiry/refresh rules.
+- Cold-start-aware HTTP timeout/retry rules. Never blindly retry non-idempotent registration/avatar creation after an ambiguous timeout.
 
 Before release, obtain:
 
-- Staging/live `wss://` endpoint and credentials.
+- Live credentials and, if required, a separate staging endpoint/account.
 - Final reconnect and response-ordering sign-off.
 - Repeatable close-code/error cases.
 
@@ -420,7 +463,7 @@ Assets/SynthCohost/
     Features/
       Avatar/
       AiResponse/
-      Stt/
+      Transcripts/
       Errors/
     Diagnostics/
       CohostDiagnostics.cs
@@ -457,9 +500,11 @@ Create a `SynthCohostConnectionSettings` ScriptableObject referenced by the boot
 
 Fields:
 
-- `Endpoint URL`, defaulting locally to `ws://127.0.0.1:8080/ws`.
+- `Endpoint URL`, defaulting for current integration to `wss://synth-cohost-app.onrender.com/ws`; optional local value: `ws://127.0.0.1:8080/ws`.
 - `Auto Connect`.
-- Final-turn response timeout.
+- `Connect Timeout Seconds`, default 75 seconds for Render cold starts.
+- `Auth Send Timeout Seconds`, default 5 seconds after socket open.
+- Final-turn response timeout, default 120 seconds for live AI/moderation processing.
 - Reconnect base delay, maximum delay, jitter, and attempt limits.
 - Diagnostic log level.
 - `Run In Background`, enabled by default.
@@ -472,6 +517,7 @@ Requirements:
 - Permit `ws` only for local/loopback development.
 - Require `wss` for live/non-loopback endpoints and never bypass certificate validation.
 - Apply a changed URL on the next connect/reconnect.
+- Keep transport-connect, auth-send, and final-turn timeouts separate; a slow Render wake-up is not an auth or AI timeout.
 - Keep access tokens out of this asset, scenes, prefabs, source, and Git.
 - Supply token and avatar ID through runtime providers independent of the URL.
 - Keep the 20-second deployed-v2 heartbeat in the dialect/session policy, not as an environment-specific endpoint field.
@@ -490,7 +536,11 @@ Requirements:
 - [x] Confirm close codes 4000–4004.
 - [x] Confirm TTS/audio/visemes are out of scope.
 - [x] Review the attached smoke script and earlier Markdown.
-- [ ] Obtain a running backend and non-committed test credentials/avatar before local integration testing.
+- [x] Confirm the live WebSocket and REST base URLs.
+- [x] Confirm Render's approximately 15-minute idle sleep and up-to-50-second cold start.
+- [x] Confirm the live text → AI → moderation → response pipeline is operational.
+- [x] Reconfirm that real audio STT/TTS and v2.1 remain pending.
+- [ ] Obtain non-committed test credentials/avatar before authenticated live integration testing.
 - [ ] Obtain the HTTP auth/avatar contract only if Unity must implement that flow.
 
 Exit: protocol implementation may start now; open items affect integration/account provisioning only.
@@ -530,6 +580,8 @@ Exit: exact fixtures round-trip without a real socket.
 
 - [ ] Define transport states, callbacks, async connect/send/close, and cancellation.
 - [ ] Implement `ClientWebSocketTransport` for Windows.
+- [ ] Apply a cancellable 75-second transport-connect timeout for the live Render deployment.
+- [ ] Allow `ConnectAsync` to remain pending through a normal approximately 50-second cold start without faulting or creating another attempt.
 - [ ] Reassemble fragmented text frames correctly.
 - [ ] Diagnose unsupported binary frames; current scope has no binary/audio contract.
 - [ ] Enforce a bounded receive buffer/message ceiling.
@@ -556,8 +608,10 @@ Also support `Stopping`, `Faulted`, and `AuthRequired`.
 
 - [ ] Define token and avatar providers.
 - [ ] Validate avatar UUID and token presence before connect.
+- [ ] Obtain/refresh the short-lived token immediately before connecting and ensure it has enough validity for a possible cold start.
 - [ ] Generate a fresh session UUID for each connection attempt.
-- [ ] Send auth immediately as the first application frame.
+- [ ] Keep the state `Connecting` while Render wakes; expose `Waking server` as diagnostic presentation rather than a separate protocol state.
+- [ ] Send auth immediately as the first application frame, using a separate 5-second send timeout after socket open.
 - [ ] Enter provisional `Ready` after auth send completes; do not wait for `session.ready`.
 - [ ] Treat subsequent 4000/4001 as a failed provisional handshake.
 - [ ] Permit domain sends only in `Ready`.
@@ -574,12 +628,13 @@ Exit: fake transport tests prove every valid/invalid transition and silent-succe
 - [ ] Stop the scheduler before replacing the session/socket.
 - [ ] Never wait for heartbeat acknowledgement.
 - [ ] Implement single-flight reconnect with exponential backoff and jitter.
+- [ ] Do not start reconnect backoff or another attempt while the current cold-start connection remains pending; retry only after its configured timeout or a definite failure.
 - [ ] Apply the provisional close policy from §4.10 behind a replaceable interface.
 - [ ] Fetch/reacquire credentials as required for each new handshake.
 - [ ] Generate a fresh session ID on reconnect.
 - [ ] Never replay STT or acknowledgements.
 - [ ] Implement `FinalTurnGate` so only one `stt.final` can be sent.
-- [ ] Release the gate on AI response, terminal system error, disconnect, cancellation, or timeout.
+- [ ] Release the gate on AI response, terminal system error, disconnect, cancellation, or the configurable 120-second response timeout.
 - [ ] Do not let partial transcripts bypass the connection rate limit.
 
 Exit: tests prove heartbeat timing, no ack dependency, backoff, fresh sessions, no replay, and one-turn enforcement.
@@ -610,13 +665,14 @@ Exit: routing tests cover every known message, unknown types, malformed payloads
 #### AI response
 
 - [ ] Publish text, emotion, and intent as a typed event.
-- [ ] Keep mock-provider response text valid for integration testing.
+- [ ] Accept nondeterministic live AI text; validate shape, enums, moderation-safe flow, and non-empty response rather than exact wording. Local/dev environments may still return mock text.
 - [ ] Add replaceable caption/presentation subscribers when UI exists.
 - [ ] Keep emotion and intent available for later presentation logic.
 
-#### STT outbound API
+#### Transcript outbound API (`stt.*`)
 
 - [ ] Expose partial and final transcript methods.
+- [ ] Accept already-produced text from a debug UI or another provider; this module does not perform real microphone speech recognition.
 - [ ] Validate ready state, non-empty text, UTF-8 length, and required `final` value.
 - [ ] Enforce one final in flight.
 - [ ] Throttle/coalesce partial messages to remain under the rate limit.
@@ -637,7 +693,7 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 - [ ] Validate missing settings, invalid URL, or missing providers in the Inspector.
 - [ ] Support auto-connect and explicit Connect/Disconnect/Reconnect.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
-- [ ] Add a developer status view: connection state, endpoint host, session presence, last event, reconnect attempt, current-turn status, and sanitized error.
+- [ ] Add a developer status view: `Connecting`/`Waking server`, elapsed connect time, endpoint host, session presence, last event, reconnect attempt, current-turn status, and sanitized error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
 
 Exit: a designer can configure and operate the socket without changing code.
@@ -647,30 +703,32 @@ Exit: a designer can configure and operate the socket without changing code.
 - [ ] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
 - [ ] Redact tokens and authorization material from every path.
 - [ ] Do not log full transcripts by default; allow sanitized/truncated development previews.
-- [ ] Add counters for connections, auth sends/failures, reconnects, messages by type, malformed messages, turn timeouts, and close codes.
+- [ ] Add counters for connection duration/cold starts, auth sends/failures, reconnects, messages by type, malformed messages, turn timeouts, and close codes.
 - [ ] Require `wss` and normal certificate validation for non-loopback/live endpoints.
 - [ ] Observe all async exceptions.
 - [ ] Bound receive buffers, pending callbacks, logs, reconnect delays, and partial-message rate.
 
 Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
 
-### Phase 10 — Local and live integration
+### Phase 10 — Live and optional local integration
 
-- [ ] Obtain the running backend and valid token/avatar.
-- [ ] Connect to `ws://127.0.0.1:8080/ws` through the Inspector setting.
+- [ ] Obtain valid non-committed credentials/avatar for the live backend.
+- [ ] Connect to `wss://synth-cohost-app.onrender.com/ws` through the Inspector setting.
+- [ ] After at least 15 minutes of backend inactivity, verify one real cold start can remain `Connecting`/`Waking server` for up to approximately 50 seconds without a false failure or duplicate attempt.
 - [ ] Verify auth is the first full v2 frame and includes the client session ID.
 - [ ] Verify no `session.ready`/heartbeat ack is required.
 - [ ] Remain connected for more than 60 seconds while 20-second heartbeats prevent close 4003.
-- [ ] Send one final transcript and verify thinking, response behavior, and AI response.
+- [ ] Run a connected soak test beyond 15 minutes to confirm heartbeat traffic keeps the live service/session active.
+- [ ] Send one final transcript and verify the live AI/moderation pipeline produces thinking, response behavior, and a valid non-empty AI response.
 - [ ] Verify the final-turn gate rejects a second simultaneous turn.
 - [ ] Apply avatar behavior and verify state ack server-side.
 - [ ] Exercise partial transcript behavior if included in the milestone.
 - [ ] Exercise malformed/auth/session/heartbeat/rate-limit close cases through backend fixtures or manual cases.
 - [ ] Force network loss and prove a new session ID, fresh auth, and no replay.
 - [ ] Confirm unknown future types do not break the session.
-- [ ] Change only the Inspector URL to the supplied live/staging `wss://` endpoint and repeat the happy path with matching credentials.
+- [ ] If local backend access is provided, change only the Inspector endpoint to `ws://127.0.0.1:8080/ws` and repeat the socket happy path with local credentials.
 
-Exit: local and live/staging pass with no bridge changes and only the endpoint URL changed between environments.
+Exit: the live endpoint passes warm/cold authenticated tests, and optional local testing requires only the endpoint URL change on the socket client.
 
 ## 10. Verification matrix
 
@@ -688,6 +746,8 @@ Exit: local and live/staging pass with no bridge changes and only the endpoint U
 - [ ] Rate-limit/throttling behavior.
 - [ ] State transitions after silent auth success.
 - [ ] Heartbeat cadence and cancellation using a fake clock.
+- [ ] A simulated 50-second pending connect remains `Connecting`, does not time out at 10–15 seconds, and never creates a duplicate connection attempt.
+- [ ] Cancellation and the 75-second transport timeout terminate a delayed connection cleanly without stale callbacks.
 - [ ] Close-code policy and reconnect backoff.
 - [ ] Fresh session on reconnect and no replay.
 - [ ] Single final-turn gate and timeout.
@@ -697,6 +757,7 @@ Exit: local and live/staging pass with no bridge changes and only the endpoint U
 - [ ] Bootstrap lifecycle and single-instance behavior.
 - [ ] Main-thread delivery to fake avatar/UI adapters.
 - [ ] Application focus/background heartbeat behavior.
+- [ ] `Waking server` status and elapsed connection time during a simulated Render cold start.
 - [ ] Scene change, Play Mode exit, and application-quit cleanup.
 - [ ] Inspector URL validation and reconnect after URL edit.
 
@@ -715,7 +776,7 @@ Exit: local and live/staging pass with no bridge changes and only the endpoint U
 4. `feat: add v2 authentication and session lifecycle`
 5. `feat: add heartbeat reconnect and final-turn control`
 6. `feat: add protocol routing and diagnostics`
-7. `feat: add avatar AI STT and error adapters`
+7. `feat: add avatar AI transcript and error adapters`
 8. `test: add PlayMode and backend integration coverage`
 9. `docs: document Unity setup local live testing and troubleshooting`
 
@@ -731,20 +792,21 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 - [ ] Reconnect creates a new session and never replays an interrupted turn.
 - [ ] Only one final turn can be active.
 - [ ] Unknown types and malformed input cannot crash/deadlock Unity.
-- [ ] Avatar, AI response, STT, state ack, and errors use replaceable interfaces.
-- [ ] TTS/audio/visemes are absent from the current implementation.
+- [ ] Avatar, AI response, transcript transport, state ack, and errors use replaceable interfaces.
+- [ ] Real microphone STT, TTS, audio, and visemes are absent from the current implementation.
 - [ ] Tokens are neither persisted nor logged.
 - [ ] EditMode, PlayMode, Windows build, and real-backend tests pass.
+- [ ] The exact live endpoint passes warm and cold-start-aware authenticated tests without reconnect storms.
 - [ ] Local/live socket switching requires only the Inspector endpoint URL change.
 - [ ] The bridge folder remains ignored, clean, and unmodified.
 
 ## Final readiness answer
 
-We are good to start Unity-side WebSocket development now.
+We are good to implement and test the Unity WebSocket client against the live backend now. The warm live WebSocket endpoint is reachable, and the backend confirms the text/AI/moderation pipeline is operational.
 
 The only items still needed are for integration and release validation, not for starting implementation:
 
-1. A running local backend and a valid short-lived token/avatar ID.
-2. Exact HTTP auth/avatar schemas only if Unity must implement register/login/avatar creation.
-3. A live/staging endpoint and credentials before live testing.
+1. A valid short-lived token and tenant-owned avatar ID/test account for authenticated live testing.
+2. Exact REST auth/avatar schemas only if Unity must implement register/login/avatar creation.
+3. A separate staging endpoint/account only if staging is required.
 4. Final reconnect/ordering rules before release sign-off.
