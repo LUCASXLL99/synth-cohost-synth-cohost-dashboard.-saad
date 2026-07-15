@@ -1,0 +1,17 @@
+{
+  "name": "SynthCohost.Runtime",
+  "rootNamespace": "SynthCohost",
+  "references": [
+    "SynthCohost.Protocol",
+    "SynthCohost.Transport"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

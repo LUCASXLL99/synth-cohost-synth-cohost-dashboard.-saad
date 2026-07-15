@@ -1,8 +1,10 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Ready to implement and test against the live deployed v2 backend.**
+Status: **Unity implementation foundation complete; authenticated live integration pending credentials.**
 
 The live WebSocket and REST hosts are available. Authenticated end-to-end testing still requires a valid access token and avatar ID (or the exact REST auth/avatar flow to create them).
+
+Implementation checkpoint (2026-07-14): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, and outbound rate safety are implemented under `Assets/SynthCohost`. Unity `6000.3.10f1` compiles the assemblies, and its native EditMode runner passes all 111 tests. PlayMode, Windows build, and credential-dependent live checks remain open.
 
 ## Source-of-truth order
 
@@ -76,8 +78,8 @@ Build a modular Unity client that:
 - Input System: `1.18.0`.
 - Test Framework: `1.6.0`.
 - One enabled starter scene: `Assets/Scenes/SampleScene.unity`.
-- No existing networking, protocol, application, avatar, UI, or test architecture.
-- No assembly definitions.
+- Networking, protocol, session, routing, adapter, bootstrap, and EditMode test architecture now lives under `Assets/SynthCohost`.
+- Five assembly definitions isolate protocol, transport, runtime, shared EditMode tests, and transport-internal tests.
 - `Application.runInBackground` is disabled and must be enabled for reliable heartbeat behavior while unfocused.
 - `System.Net.WebSockets.ClientWebSocket` is available for the current Windows/.NET target.
 
@@ -547,49 +549,49 @@ Exit: protocol implementation may start now; open items affect integration/accou
 
 ### Phase 1 — Project foundation
 
-- [ ] Remove or replace the unused `NewMonoBehaviourScript` template when implementation begins.
-- [ ] Create the `Assets/SynthCohost` folder structure and namespaces.
-- [ ] Add assembly definitions from §7.
-- [ ] Add a serializer behind `IProtocolCodec`; prefer Unity's supported Newtonsoft JSON package for exact field control and envelope inspection.
-- [ ] Use `ClientWebSocket` for the current Windows target behind `IWebSocketTransport`.
-- [ ] Keep room for a separate mobile/WebGL transport adapter without changing session or feature code.
-- [ ] Enable `Application.runInBackground` through bootstrap/settings.
+- [x] Remove or replace the unused `NewMonoBehaviourScript` template when implementation begins.
+- [x] Create the `Assets/SynthCohost` folder structure and namespaces.
+- [x] Add assembly definitions from §7.
+- [x] Add a serializer behind `IProtocolCodec`; prefer Unity's supported Newtonsoft JSON package for exact field control and envelope inspection.
+- [x] Use `ClientWebSocket` for the current Windows target behind `IWebSocketTransport`.
+- [x] Keep room for a separate mobile/WebGL transport adapter without changing session or feature code.
+- [x] Enable `Application.runInBackground` through bootstrap/settings.
 - [ ] Add a dedicated bootstrap prefab or integration scene without coupling networking to sample-scene content.
 
 Exit: assemblies compile and EditMode/PlayMode test assemblies run.
 
 ### Phase 2 — Implement and test deployed-v2 DTOs
 
-- [ ] Add exact event-name constants.
-- [ ] Implement `DeployedV2ProtocolDialect` with integer `v: 2`.
-- [ ] Model one common envelope that always includes `session_id`, including auth.
-- [ ] Implement typed DTOs for auth, heartbeat, STT partial/final, state ack, avatar state, AI response, and system error.
-- [ ] Use explicit JSON property names.
-- [ ] Add explicit enum converters/TryParse behavior.
-- [ ] Generate invariant UTC RFC3339 timestamps.
-- [ ] Implement session-ID, UTF-8 STT-length, and serialized-size checks.
-- [ ] Inspect `type` before selecting a payload DTO.
-- [ ] Ignore unknown event types safely.
-- [ ] Diagnose malformed known payloads without throwing into the frame loop.
-- [ ] Add golden JSON fixtures matching all three frames in `test_ws.sh`.
-- [ ] Add inbound fixtures for the expected avatar and AI responses.
+- [x] Add exact event-name constants.
+- [x] Implement `DeployedV2ProtocolDialect` with integer `v: 2`.
+- [x] Model one common envelope that always includes `session_id`, including auth.
+- [x] Implement typed DTOs for auth, heartbeat, STT partial/final, state ack, avatar state, AI response, and system error.
+- [x] Use explicit JSON property names.
+- [x] Add explicit enum converters/TryParse behavior.
+- [x] Generate invariant UTC RFC3339 timestamps.
+- [x] Implement session-ID, UTF-8 STT-length, and serialized-size checks.
+- [x] Inspect `type` before selecting a payload DTO.
+- [x] Ignore unknown event types safely.
+- [x] Diagnose malformed known payloads without throwing into the frame loop.
+- [x] Add golden JSON fixtures matching all three frames in `test_ws.sh`.
+- [x] Add inbound fixtures for the expected avatar and AI responses.
 
 Exit: exact fixtures round-trip without a real socket.
 
 ### Phase 3 — WebSocket transport
 
-- [ ] Define transport states, callbacks, async connect/send/close, and cancellation.
-- [ ] Implement `ClientWebSocketTransport` for Windows.
-- [ ] Apply a cancellable 75-second transport-connect timeout for the live Render deployment.
-- [ ] Allow `ConnectAsync` to remain pending through a normal approximately 50-second cold start without faulting or creating another attempt.
-- [ ] Reassemble fragmented text frames correctly.
-- [ ] Diagnose unsupported binary frames; current scope has no binary/audio contract.
-- [ ] Enforce a bounded receive buffer/message ceiling.
-- [ ] Serialize outbound sends through one async gate.
-- [ ] Preserve numeric close codes and reasons in `TransportCloseInfo`.
-- [ ] Make shutdown idempotent across Play Mode exit, scene teardown, quit, cancellation, and domain reload.
-- [ ] Marshal all Unity-facing callbacks to the Unity main thread.
-- [ ] Test transport behavior through a fake adapter and optional loopback fixture.
+- [x] Define transport states, callbacks, async connect/send/close, and cancellation.
+- [x] Implement `ClientWebSocketTransport` for Windows.
+- [x] Apply a cancellable 75-second transport-connect timeout for the live Render deployment.
+- [x] Allow `ConnectAsync` to remain pending through a normal approximately 50-second cold start without faulting or creating another attempt.
+- [x] Reassemble fragmented text frames correctly.
+- [x] Diagnose unsupported binary frames; current scope has no binary/audio contract.
+- [x] Enforce a bounded receive buffer/message ceiling.
+- [x] Serialize outbound sends through one async gate.
+- [x] Preserve numeric close codes and reasons in `TransportCloseInfo`.
+- [x] Make shutdown idempotent across Play Mode exit, scene teardown, quit, cancellation, and domain reload.
+- [x] Marshal all Unity-facing callbacks to the Unity main thread.
+- [x] Test transport behavior through a fake adapter and optional loopback fixture.
 
 Exit: connect/send/receive/close/cancel behavior is deterministic and leak-free.
 
@@ -606,49 +608,49 @@ Disconnected -> Connecting -> Authenticating -> Ready
 
 Also support `Stopping`, `Faulted`, and `AuthRequired`.
 
-- [ ] Define token and avatar providers.
-- [ ] Validate avatar UUID and token presence before connect.
+- [x] Define token and avatar providers.
+- [x] Validate avatar UUID and token presence before connect.
 - [ ] Obtain/refresh the short-lived token immediately before connecting and ensure it has enough validity for a possible cold start.
-- [ ] Generate a fresh session UUID for each connection attempt.
-- [ ] Keep the state `Connecting` while Render wakes; expose `Waking server` as diagnostic presentation rather than a separate protocol state.
-- [ ] Send auth immediately as the first application frame, using a separate 5-second send timeout after socket open.
-- [ ] Enter provisional `Ready` after auth send completes; do not wait for `session.ready`.
-- [ ] Treat subsequent 4000/4001 as a failed provisional handshake.
-- [ ] Permit domain sends only in `Ready`.
-- [ ] Clear heartbeat, current session, stale callbacks, and in-flight turn on disconnect.
-- [ ] Publish typed state changes for diagnostics/UI.
-- [ ] Never persist or log tokens.
+- [x] Generate a fresh session UUID for each connection attempt.
+- [x] Keep the state `Connecting` while Render wakes; expose `Waking server` as diagnostic presentation rather than a separate protocol state.
+- [x] Send auth immediately as the first application frame, using a separate 5-second send timeout after socket open.
+- [x] Enter provisional `Ready` after auth send completes; do not wait for `session.ready`.
+- [x] Treat subsequent 4000/4001 as a failed provisional handshake.
+- [x] Permit domain sends only in `Ready`.
+- [x] Clear heartbeat, current session, stale callbacks, and in-flight turn on disconnect.
+- [x] Publish typed state changes for diagnostics/UI.
+- [x] Never persist or log tokens.
 
 Exit: fake transport tests prove every valid/invalid transition and silent-success handshake behavior.
 
 ### Phase 5 — Heartbeat, reconnect, and final-turn control
 
-- [ ] Start heartbeat after auth send succeeds.
-- [ ] Send a full v2 heartbeat every 20 seconds using monotonic/realtime timing.
-- [ ] Stop the scheduler before replacing the session/socket.
-- [ ] Never wait for heartbeat acknowledgement.
-- [ ] Implement single-flight reconnect with exponential backoff and jitter.
-- [ ] Do not start reconnect backoff or another attempt while the current cold-start connection remains pending; retry only after its configured timeout or a definite failure.
-- [ ] Apply the provisional close policy from §4.10 behind a replaceable interface.
-- [ ] Fetch/reacquire credentials as required for each new handshake.
-- [ ] Generate a fresh session ID on reconnect.
-- [ ] Never replay STT or acknowledgements.
-- [ ] Implement `FinalTurnGate` so only one `stt.final` can be sent.
-- [ ] Release the gate on AI response, terminal system error, disconnect, cancellation, or the configurable 120-second response timeout.
-- [ ] Do not let partial transcripts bypass the connection rate limit.
+- [x] Start heartbeat after auth send succeeds.
+- [x] Send a full v2 heartbeat every 20 seconds using monotonic/realtime timing.
+- [x] Stop the scheduler before replacing the session/socket.
+- [x] Never wait for heartbeat acknowledgement.
+- [x] Implement single-flight reconnect with exponential backoff and jitter.
+- [x] Do not start reconnect backoff or another attempt while the current cold-start connection remains pending; retry only after its configured timeout or a definite failure.
+- [x] Apply the provisional close policy from §4.10 behind a replaceable interface.
+- [x] Fetch/reacquire credentials as required for each new handshake.
+- [x] Generate a fresh session ID on reconnect.
+- [x] Never replay STT or acknowledgements.
+- [x] Implement `FinalTurnGate` so only one `stt.final` can be sent.
+- [x] Release the gate on AI response, terminal system error, disconnect, cancellation, or the configurable 120-second response timeout.
+- [x] Do not let partial transcripts bypass the connection rate limit.
 
 Exit: tests prove heartbeat timing, no ack dependency, backoff, fresh sessions, no replay, and one-turn enforcement.
 
 ### Phase 6 — Message routing
 
-- [ ] Route by exact `type` string.
-- [ ] Register one typed handler for avatar state, AI response, and system error.
-- [ ] Keep routing independent of scenes and concrete feature implementations.
-- [ ] Ignore unknown types.
-- [ ] Reject messages whose session ID does not match the active socket session.
-- [ ] Prevent late callbacks from a disposed socket/session reaching the current scene.
-- [ ] Preserve per-socket receive order when dispatching to the main thread.
-- [ ] Isolate handler exceptions from the receive loop.
+- [x] Route by exact `type` string.
+- [x] Register one typed handler for avatar state, AI response, and system error.
+- [x] Keep routing independent of scenes and concrete feature implementations.
+- [x] Ignore unknown types.
+- [x] Reject messages whose session ID does not match the active socket session.
+- [x] Prevent late callbacks from a disposed socket/session reaching the current scene.
+- [x] Preserve per-socket receive order when dispatching to the main thread.
+- [x] Isolate handler exceptions from the receive loop.
 
 Exit: routing tests cover every known message, unknown types, malformed payloads, stale sessions, and handler errors.
 
@@ -656,31 +658,31 @@ Exit: routing tests cover every known message, unknown types, malformed payloads
 
 #### Avatar state
 
-- [ ] Define `IAvatarBehaviorController`, independent of `Animator` and avatar assets.
-- [ ] Map all six current behavior values.
-- [ ] Apply transitions on the Unity main thread.
-- [ ] Send `state.ack` only after successful application.
-- [ ] Do not send a false ack if the avatar/controller is unavailable.
+- [x] Define `IAvatarBehaviorController`, independent of `Animator` and avatar assets.
+- [x] Map all six current behavior values.
+- [x] Apply transitions on the Unity main thread.
+- [x] Send `state.ack` only after successful application.
+- [x] Do not send a false ack if the avatar/controller is unavailable.
 
 #### AI response
 
-- [ ] Publish text, emotion, and intent as a typed event.
-- [ ] Accept nondeterministic live AI text; validate shape, enums, moderation-safe flow, and non-empty response rather than exact wording. Local/dev environments may still return mock text.
-- [ ] Add replaceable caption/presentation subscribers when UI exists.
-- [ ] Keep emotion and intent available for later presentation logic.
+- [x] Publish text, emotion, and intent as a typed event.
+- [x] Accept nondeterministic live AI text; validate shape, enums, moderation-safe flow, and non-empty response rather than exact wording. Local/dev environments may still return mock text.
+- [x] Add replaceable caption/presentation subscribers when UI exists.
+- [x] Keep emotion and intent available for later presentation logic.
 
 #### Transcript outbound API (`stt.*`)
 
-- [ ] Expose partial and final transcript methods.
-- [ ] Accept already-produced text from a debug UI or another provider; this module does not perform real microphone speech recognition.
-- [ ] Validate ready state, non-empty text, UTF-8 length, and required `final` value.
-- [ ] Enforce one final in flight.
-- [ ] Throttle/coalesce partial messages to remain under the rate limit.
-- [ ] Return explicit success/failure results.
+- [x] Expose partial and final transcript methods.
+- [x] Accept already-produced text from a debug UI or another provider; this module does not perform real microphone speech recognition.
+- [x] Validate ready state, non-empty text, UTF-8 length, and required `final` value.
+- [x] Enforce one final in flight.
+- [x] Throttle/coalesce partial messages to remain under the rate limit.
+- [x] Return explicit success/failure results.
 
 #### System errors
 
-- [ ] Publish typed code/message data to diagnostics/UI.
+- [x] Publish typed code/message data to diagnostics/UI.
 - [ ] Distinguish an in-session error from an error followed by close.
 - [ ] Avoid exposing sensitive raw backend details in production UI/logs.
 
@@ -688,10 +690,10 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 
 ### Phase 8 — Bootstrap and Inspector workflow
 
-- [ ] Create `SynthCohostClientBehaviour` as lifecycle owner.
-- [ ] Reference settings and adapters through serialized fields/composition.
-- [ ] Validate missing settings, invalid URL, or missing providers in the Inspector.
-- [ ] Support auto-connect and explicit Connect/Disconnect/Reconnect.
+- [x] Create `SynthCohostClientBehaviour` as lifecycle owner.
+- [x] Reference settings and adapters through serialized fields/composition.
+- [x] Validate missing settings, invalid URL, or missing providers in the Inspector.
+- [x] Support auto-connect and explicit Connect/Disconnect/Reconnect.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
 - [ ] Add a developer status view: `Connecting`/`Waking server`, elapsed connect time, endpoint host, session presence, last event, reconnect attempt, current-turn status, and sanitized error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
@@ -700,12 +702,12 @@ Exit: a designer can configure and operate the socket without changing code.
 
 ### Phase 9 — Diagnostics, security, and resilience
 
-- [ ] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
-- [ ] Redact tokens and authorization material from every path.
-- [ ] Do not log full transcripts by default; allow sanitized/truncated development previews.
+- [x] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
+- [x] Redact tokens and authorization material from every path.
+- [x] Do not log full transcripts by default; allow sanitized/truncated development previews.
 - [ ] Add counters for connection duration/cold starts, auth sends/failures, reconnects, messages by type, malformed messages, turn timeouts, and close codes.
-- [ ] Require `wss` and normal certificate validation for non-loopback/live endpoints.
-- [ ] Observe all async exceptions.
+- [x] Require `wss` and normal certificate validation for non-loopback/live endpoints.
+- [x] Observe all async exceptions.
 - [ ] Bound receive buffers, pending callbacks, logs, reconnect delays, and partial-message rate.
 
 Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
@@ -734,21 +736,21 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### EditMode
 
-- [ ] Exact current-v2 auth, heartbeat, partial, final, and ack serialization.
-- [ ] Exact avatar, AI, and error deserialization.
-- [ ] Integer `v: 2` and session ID on every frame.
-- [ ] RFC3339 UTC timestamps.
-- [ ] Enum mapping and unknown enum behavior.
-- [ ] Unknown event ignored.
-- [ ] Malformed known payload diagnosed.
-- [ ] Session mismatch rejected.
-- [ ] STT 4,000 UTF-8-byte boundary and message 64-KiB boundary.
-- [ ] Rate-limit/throttling behavior.
-- [ ] State transitions after silent auth success.
-- [ ] Heartbeat cadence and cancellation using a fake clock.
+- [x] Exact current-v2 auth, heartbeat, partial, final, and ack serialization.
+- [x] Exact avatar, AI, and error deserialization.
+- [x] Integer `v: 2` and session ID on every frame.
+- [x] RFC3339 UTC timestamps.
+- [x] Enum mapping and unknown enum behavior.
+- [x] Unknown event ignored.
+- [x] Malformed known payload diagnosed.
+- [x] Session mismatch rejected.
+- [x] STT 4,000 UTF-8-byte boundary and message 64-KiB boundary.
+- [x] Rate-limit/throttling behavior.
+- [x] State transitions after silent auth success.
+- [x] Heartbeat cadence and cancellation using a fake clock.
 - [ ] A simulated 50-second pending connect remains `Connecting`, does not time out at 10–15 seconds, and never creates a duplicate connection attempt.
 - [ ] Cancellation and the 75-second transport timeout terminate a delayed connection cleanly without stale callbacks.
-- [ ] Close-code policy and reconnect backoff.
+- [x] Close-code policy and reconnect backoff.
 - [ ] Fresh session on reconnect and no replay.
 - [ ] Single final-turn gate and timeout.
 
@@ -763,7 +765,8 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### Build
 
-- [ ] Run EditMode and PlayMode suites.
+- [x] Run the EditMode suite in Unity `6000.3.10f1` (111/111 passing on 2026-07-14).
+- [ ] Add and run the PlayMode suite.
 - [ ] Produce and smoke-test a Windows Standalone development build.
 - [ ] Verify IL2CPP/AOT serialization if Android/iOS becomes in scope.
 - [ ] Add a WebGL transport/build test only if WebGL becomes an approved target.
@@ -784,27 +787,27 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 
 ## 12. Definition of done
 
-- [ ] Unity emits exact deployed-v2 field names and types.
-- [ ] Auth is first and contains integer `v: 2`, client session ID, timestamp, token, and avatar ID.
-- [ ] Unity does not wait for `session.ready` or heartbeat ack.
-- [ ] Heartbeat sends every 20 seconds and stops with the session.
-- [ ] Close codes 4000–4004 produce bounded, visible behavior.
-- [ ] Reconnect creates a new session and never replays an interrupted turn.
-- [ ] Only one final turn can be active.
-- [ ] Unknown types and malformed input cannot crash/deadlock Unity.
-- [ ] Avatar, AI response, transcript transport, state ack, and errors use replaceable interfaces.
-- [ ] Real microphone STT, TTS, audio, and visemes are absent from the current implementation.
-- [ ] Tokens are neither persisted nor logged.
+- [x] Unity emits exact deployed-v2 field names and types.
+- [x] Auth is first and contains integer `v: 2`, client session ID, timestamp, token, and avatar ID.
+- [x] Unity does not wait for `session.ready` or heartbeat ack.
+- [x] Heartbeat sends every 20 seconds and stops with the session.
+- [x] Close codes 4000–4004 produce bounded, visible behavior.
+- [x] Reconnect creates a new session and never replays an interrupted turn.
+- [x] Only one final turn can be active.
+- [x] Unknown types and malformed input cannot crash/deadlock Unity.
+- [x] Avatar, AI response, transcript transport, state ack, and errors use replaceable interfaces.
+- [x] Real microphone STT, TTS, audio, and visemes are absent from the current implementation.
+- [x] Tokens are neither persisted nor logged.
 - [ ] EditMode, PlayMode, Windows build, and real-backend tests pass.
 - [ ] The exact live endpoint passes warm and cold-start-aware authenticated tests without reconnect storms.
 - [ ] Local/live socket switching requires only the Inspector endpoint URL change.
-- [ ] The bridge folder remains ignored, clean, and unmodified.
+- [x] The bridge folder remains ignored, clean, and unmodified.
 
 ## Final readiness answer
 
-We are good to implement and test the Unity WebSocket client against the live backend now. The warm live WebSocket endpoint is reachable, and the backend confirms the text/AI/moderation pipeline is operational.
+The Unity client foundation is implemented and its 111 EditMode tests pass in Unity. We are ready for scene-level PlayMode wiring and authenticated live testing; the warm live WebSocket endpoint is reachable, and the backend confirms the text/AI/moderation pipeline is operational.
 
-The only items still needed are for integration and release validation, not for starting implementation:
+The remaining inputs are for integration and release validation:
 
 1. A valid short-lived token and tenant-owned avatar ID/test account for authenticated live testing.
 2. Exact REST auth/avatar schemas only if Unity must implement register/login/avatar creation.
