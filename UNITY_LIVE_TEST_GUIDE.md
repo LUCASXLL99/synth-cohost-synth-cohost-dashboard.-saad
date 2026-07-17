@@ -18,7 +18,7 @@ The live test requires both values from the same live backend account:
 1. A valid short-lived access token obtained through the backend's supported login/refresh flow.
 2. A tenant-owned avatar UUID created or returned by the backend/avatar dashboard.
 
-The exact REST register/login/refresh/`POST /avatars` request and response schemas are not present in this Unity repository. Request either a test token plus matching avatar UUID from the backend developer, or the exact REST API contract so Unity can implement the flow.
+The live REST base is `https://synth-cohost-app.onrender.com`. The verified temporary workflow uses `POST /auth/login` with email/password and `POST /auth/refresh` when a fresh access token is needed; avatars are created through `POST /avatars`. REST credentials remain outside Unity, and the live-test panel accepts only the resulting access token and matching avatar UUID at runtime.
 
 Do not use the development token or placeholder avatar from `test_ws.sh` against the live backend.
 
@@ -31,7 +31,7 @@ Do not use the development token or placeholder avatar from `test_ws.sh` against
 5. Paste the matching avatar UUID into **Avatar UUID**.
 6. Click **Connect** once.
 7. Watch **State**. A sleeping Render service can remain `Connecting (Waking server...)` for about 50 seconds. Do not click Connect again.
-8. Continue only when the state becomes `Ready`.
+8. Continue only when the state becomes `Ready`. In deployed v2 this initially means the socket opened and the auth frame was sent; there is no positive `session.ready` response. The panel changes to **backend activity received** after the first valid inbound event.
 9. Enter text under **Transcript**, then click **Send Final**.
 10. Expect a simulated avatar state such as `thinking`, followed by an AI response containing text, emotion, and intent. Any `system.error` is displayed in the panel.
 11. Leave the connection open for more than 60 seconds to confirm 20-second heartbeats keep it alive.
@@ -60,8 +60,10 @@ This recreates the settings asset, prefab references, scene, and Build Settings 
 
 ## Useful failure meanings
 
-- `AuthRequired`, close `4000`, or close `4001`: obtain a fresh token and confirm the avatar belongs to that account.
+- `AUTH_FAILED`, `AuthRequired`, close `4000`, or close `4001`: obtain a fresh token and confirm the avatar belongs to that account. Paste the replacement token and click **Connect**; **Reconnect** intentionally does not retry a rejected token.
 - Close `4002`: the session/envelope does not match the deployed v2 contract.
 - Close `4003`: heartbeat timeout; capture the Console and panel status.
 - Close `4004`: rate limit; wait for the displayed retry period and reduce partial-message frequency.
 - `TurnAlreadyInFlight`: wait for the current `ai.response`, terminal error, disconnect, or turn timeout.
+
+The panel now shows the last inbound event, last outbound event, their UTC times, the sanitized close summary, and a safe client error. The live settings asset uses verbose diagnostics, so the Console also records state transitions, event names, reconnect timing, and close-policy decisions without logging tokens or transcript contents.

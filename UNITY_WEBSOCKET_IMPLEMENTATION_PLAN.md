@@ -1,10 +1,10 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Unity implementation foundation complete; authenticated v2 integration and broader backend release integration remain pending.**
+Status: **Unity implementation foundation, bridge audit, and live-test auth/UI hardening complete; authenticated v2 happy-path and broader backend release acceptance remain pending.**
 
-The live WebSocket and REST hosts are available. Authenticated end-to-end testing still requires a valid access token and avatar ID (or the exact REST auth/avatar flow to create them). The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
+The live WebSocket and REST hosts are available. A temporary live test account and matching avatar UUID have now been created through the verified REST flow; a fresh short-lived access token must be minted immediately before each live run. The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
 
-Implementation checkpoint (2026-07-16): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. Unity `6000.3.10f1` passes all 115 EditMode tests and the live-scene PlayMode smoke test. Windows build and credential-dependent live checks remain open.
+Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The panel is width-constrained and responsive, while safe diagnostics show state transitions, inbound/outbound event names, UTC times, retry timing, and close-policy decisions without logging untrusted identifiers, close reasons, endpoint credentials, tokens, or transcript text. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 135/135 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
 
 ## Source-of-truth order
 
@@ -13,7 +13,7 @@ Use sources in this order when details conflict:
 1. `Assets/websocket-protocol-spec.docx` — canonical document covering current v2 and proposed 2.1.
 2. Backend/client confirmations recorded from 2026-07-13 through 2026-07-15 in §5.
 3. `E:\Downloads\test_ws.sh` — exact current-v2 happy-path wire example.
-4. `synth-cohost-unity-bridge` at commit `ca5bd8a` — exported Rust payload/type reference.
+4. `synth-cohost-unity-bridge` at commit `79fbf85` — exported Rust/domain/media/OBS reference. Its README and event document remain draft, so they clarify implementation details but do not override confirmed deployed-v2 decisions.
 5. `E:\Downloads\WEBSOCKET_DOCS_SAAD.md` — earlier draft notes; context only.
 
 The earlier Markdown notes must not override the DOCX, the latest written backend decisions, or the current smoke-test frames.
@@ -68,6 +68,8 @@ Build a modular Unity client that:
 - `session.ready` and server-generated session IDs in current v2.
 - `heartbeat.ack`.
 - Real microphone speech-to-text, TTS, audio streaming, `speech.*`, lip sync, and visemes. The text-based `stt.final` protocol event remains in scope.
+- Direct OBS control, OBS credentials, RTMP/NDI output, screen/video capture, broadcast start/stop, and dashboard video delivery. The exported OBS transport is backend/sidecar code and is not exposed through the Synth Cohost WebSocket contract.
+- Backend plan-tier/entitlement enforcement. The exported plan limits do not appear in any Unity-facing event.
 - Multiple concurrent `stt.final` turns.
 - Session resumption or replay after disconnect.
 - Final avatar art, animation graphs, captions UI, and audio assets that are not present yet.
@@ -253,7 +255,7 @@ The backend confirms codes 4000–4004, but final reconnect rules are still open
 | Normal/user shutdown | Intentional | Do not reconnect. |
 | Network/abnormal close | Transport loss | Reconnect with exponential backoff and jitter. |
 | 4000 | `MALFORMED_PAYLOAD` | Stop retrying and surface a protocol/configuration error. |
-| 4001 | `AUTH_FAILED` | Reacquire credentials once; retry only if successful, otherwise enter `AuthRequired`. |
+| 4001 | `AUTH_FAILED` | Enter `AuthRequired`; never retry the same rejected token. A user/provider must supply fresh credentials before a new Connect. |
 | 4002 | `SESSION_MISMATCH` | Clear state and attempt one fresh connection/session; stop if repeated. |
 | 4003 | `HEARTBEAT_TIMEOUT` | Reconnect automatically with a new session. |
 | 4004 | `RATE_LIMIT_EXCEEDED` | Wait at least the server's 10-second window plus backoff before retrying. |
@@ -369,7 +371,26 @@ The backend status update says:
 
 This is release-readiness context, not a replacement wire contract. Continue using deployed v2 until the backend supplies an explicit versioned protocol change. Do not implement Unity handlers for the named runtime systems unless they expose Unity-facing events with schemas, ordering/correlation/error rules, fixtures, and a migration date.
 
-### 5.8 Final implementation decision
+### 5.8 Bridge export update — 2026-07-16/17
+
+Before this audit, the existing Unity changes were checkpointed as `e1df3a2` and pushed to `origin/main`. The ignored bridge repository was then pulled through the personal-account SSH remote, fast-forwarded from `ca5bd8a` to `79fbf85`, and audited without modifying it. The refresh promotes active workspace copies under `crates/` for `runtime_bridge`, `domain`, and `media`, adds an OBS WebSocket transport and an interim `docs/websocket-events.md`, then removes a duplicate root copy of that event document.
+
+The audit found no approved or deployed Unity wire change:
+
+- The bridge README still marks the target spec as draft/pending sign-off and explicitly says not to implement `protocol_version` or `session.ready` yet.
+- The proposed document is internally inconsistent about whether the breaking session/version change would be `2.1` or a new major version. A future dialect must not ship until the backend names the final version, approved backend commit, deployed endpoint/date, and final fixtures.
+- The exported runtime still uses integer `v: 2`, an envelope-level client session ID, auth with `token` plus UUID `avatar_id`, and the existing current-v2 event names.
+- Behavior, emotion, and intent values match the Unity enums exactly.
+- The exported limits match Unity's existing safeguards: 128-byte session IDs, 4,000-byte STT text, and JSON nesting depth 32. Unity additionally retains its 64 KiB frame cap and connection-wide outbound safety limit from the confirmed current contract.
+- `AI_GENERATION_FAILED` is now documented as a possible `system.error` for a failed final-turn generation. Unity already parses arbitrary sanitized error codes/messages, presents this code, and releases the single-turn gate on a handled error.
+- The Rust `SttTextPayload` currently models only `text`, while the bridge event document and prior explicit backend confirmation still require `final: false/true`. Serde accepts the extra field, so Unity must continue sending and validating `final`; this discrepancy should be corrected or clarified in the exported Rust model before any generated-contract workflow is adopted.
+- `speech.start`, `speech.viseme`, and `speech.end` are scaffolded, but the bridge document says they are not wired and the media crate contains only mock STT/TTS providers. No audio URL/bytes/codec, viseme vocabulary, cancellation, ordering, or reconnect rules are defined. Unity must keep safely ignoring these unknown types for now.
+- The OBS WebSocket transport connects from the backend/sidecar process directly to OBS and only issues `SetCurrentProgramScene`. No Synth Cohost envelope routes an OBS command to Unity, and no Unity video/audio delivery path is defined. OBS credentials and control therefore must not be added to Unity.
+- Backend plan tiers and fallback AI responses need no Unity DTO: fallbacks arrive as ordinary `ai.response` frames and tier limits are not on the socket.
+
+Because the current Unity implementation already conforms to every deployable item in this export, the required implementation action is to preserve the existing deployed-v2 dialect and update this plan. Adding speculative speech or OBS production code would create an unapproved contract rather than implement one.
+
+### 5.9 Final implementation decision
 
 Implement one deployed-v2 dialect now. Do not build a hybrid or Inspector toggle between current v2 and proposed 2.1. Isolate protocol/session ownership and reconnect behavior behind interfaces, while keeping avatar, AI-response, STT, and UI code independent.
 
@@ -402,7 +423,13 @@ It is a useful wire reference but not a complete automated acceptance test:
 
 It confirms the broad v2 envelope, auth/avatar purpose, event names, fixed heartbeat requirement, mocked development AI behavior, and out-of-scope speech work. It also contains abbreviated/older examples and open notes, so it remains secondary to the DOCX and latest backend confirmation.
 
-### 6.3 Readiness verdict
+### 6.3 What bridge `79fbf85` contributes
+
+The latest bridge export gives source-level confirmation of the existing envelope, enum strings, auth/avatar payload, validation limits, unknown-event behavior, and `AI_GENERATION_FAILED`. It also exposes future/backend-only scaffolding for speech media, plan limits, and direct OBS scene switching.
+
+The export is useful corroborating evidence, not a new deployment notice: its README says draft/pending sign-off, its event document calls itself interim, and its speech rows explicitly say not wired. The active Cargo workspace points at `crates/*`, while some README paths and adjacent test wiring still reflect the older layout. Cargo is not installed on this workstation, so these Rust crates were source-audited but not independently compiled; their OBS tests are protocol/parser tests rather than live OBS I/O. The current Unity codec, DTOs, router, session controller, and live harness already cover all deployable v2 items. No new Unity runtime handler is justified by this bridge revision.
+
+### 6.4 Readiness verdict
 
 | Area | Status |
 |---|---|
@@ -412,23 +439,26 @@ It confirms the broad v2 envelope, auth/avatar purpose, event names, fixed heart
 | Auth/session/heartbeat logic | Ready. |
 | Single final-turn workflow | Ready. |
 | Avatar/AI/error adapters | Ready. |
-| Live endpoint connectivity | Verified while warm; authenticated test credentials are still required. |
+| Live endpoint connectivity | TLS/WebSocket and server error delivery verified while warm; a temporary matching test account/avatar is available. Fresh-token happy-path remains to run. |
 | Frontend/Vercel deployment | Not a Unity networking dependency; the production frontend domain is still pending. |
 | Live text/AI/moderation happy path | Previously confirmed working for current v2; final production-runtime/mock status must be revalidated. |
 | Backend runtime integrations | Attention Routing, Event Response, Memory, mock replacement, and communication-protocol finalization are still in progress; no Unity-visible delta supplied. |
+| Bridge `79fbf85` current-v2 compatibility | Audited; existing Unity implementation matches all deployable fields, enums, limits, and event behavior. |
+| Bridge speech/media scaffolding | Not ready for Unity; mock/not wired and missing audio/viseme lifecycle details. |
+| Bridge OBS scene control | Backend/sidecar-only; no Unity event or defined Unity-to-OBS/dashboard media path. |
 | Live avatar presentation boundary | Needs confirmation before choosing Windows-only, WebGL, captured/streamed output, or another delivery path. |
 | Local happy-path integration | Optional; requires the full backend workspace and local credentials. |
-| Unity-owned register/login/avatar creation | Needs the exact HTTP API contract if included. |
+| Unity-owned register/login/avatar creation | REST login/refresh/avatar routes were verified externally; implementing them inside Unity remains out of scope unless requested. |
 | Full close/error acceptance | Needs backend fixtures or manual test cases. |
-| Live authenticated verification | Endpoint is known; needs matching credentials/avatar. |
+| Live authenticated verification | Expired-token rejection verified and hardened; refresh the token and run the text happy path with the existing matching avatar. |
 | Render cold-start behavior | Requirements known; must be tested with a delayed connection and one real idle wake-up. |
 | Proposed 2.1 | Future work; does not block v2. |
 
-### 6.4 Remaining inputs
+### 6.5 Remaining inputs
 
 No additional backend answer is required before starting Unity WebSocket development.
 
-Before authenticated live acceptance, obtain a valid short-lived token and tenant-owned avatar ID, or a test account that can create them through the REST API.
+Before authenticated live acceptance, log in with the existing temporary test account immediately before the run and use its matching avatar UUID. Do not reuse a JWT from an earlier session after it expires.
 
 Local backend access is now optional because a live endpoint exists. If local verification is still desired, obtain the full backend workspace/run instructions and prerequisites required by `test_ws.sh`.
 
@@ -447,6 +477,8 @@ Before release, obtain:
 - A real-versus-mock environment matrix and confirmation that the required production runtime integrations are active.
 - A versioned protocol diff plus fixtures for any Unity-visible change introduced by the finalized communication protocols.
 - The dashboard live-avatar delivery method and resulting Unity build/deployment target.
+- If OBS/broadcast delivery is part of Unity's later scope: where the OBS connector runs; how Unity pixels and audio reach it; required platform, resolution, frame rate, latency, alpha, and audio routing; who owns OBS credentials; and whether Unity controls scenes at all.
+- Before future `speech.*` work: exact audio transport and codec, viseme shape vocabulary, timing/order guarantees, utterance cancellation/reconnect semantics, payload size/rate limits, and golden fixtures.
 
 ## 7. Proposed Unity architecture
 
@@ -572,6 +604,9 @@ Requirements:
 - [x] Reconfirm that real audio STT/TTS and v2.1 remain pending.
 - [x] Confirm Unity has no dependency on the temporary Vercel frontend URL.
 - [x] Record the 2026-07-15 integration-stage update; it supplied no current-v2 frame change.
+- [x] Pull and audit bridge `79fbf85`; confirm it supplies no approved/deployed Unity wire delta.
+- [x] Confirm exported OBS control, plan tiers, mock media, and unwired `speech.*` do not enter the current Unity milestone.
+- [x] Record the Rust `SttTextPayload`/required-`final` discrepancy and preserve the explicitly confirmed wire discriminator.
 - [ ] Obtain non-committed test credentials/avatar before authenticated live integration testing.
 - [ ] Obtain the HTTP auth/avatar contract only if Unity must implement that flow.
 - [ ] Confirm how the dashboard live-avatar panel will receive Unity output: Windows client, WebGL embed, captured/streamed output, or another integration.
@@ -603,6 +638,7 @@ Exit: assemblies compile and EditMode/PlayMode test assemblies run.
 - [x] Add explicit enum converters/TryParse behavior.
 - [x] Generate invariant UTC RFC3339 timestamps.
 - [x] Implement session-ID, UTF-8 STT-length, and serialized-size checks.
+- [x] Enforce the exported maximum JSON nesting depth of 32.
 - [x] Inspect `type` before selecting a payload DTO.
 - [x] Ignore unknown event types safely.
 - [x] Diagnose malformed known payloads without throwing into the frame loop.
@@ -649,6 +685,7 @@ Also support `Stopping`, `Faulted`, and `AuthRequired`.
 - [x] Send auth immediately as the first application frame, using a separate 5-second send timeout after socket open.
 - [x] Enter provisional `Ready` after auth send completes; do not wait for `session.ready`.
 - [x] Treat subsequent 4000/4001 as a failed provisional handshake.
+- [x] Treat `system.error/AUTH_FAILED` as an immediate authentication rejection, leave `Ready`, clear the session, and require a fresh token without an unchanged-token retry.
 - [x] Permit domain sends only in `Ready`.
 - [x] Clear heartbeat, current session, stale callbacks, and in-flight turn on disconnect.
 - [x] Publish typed state changes for diagnostics/UI.
@@ -728,8 +765,9 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 - [x] Validate missing settings, invalid URL, or missing providers in the Inspector.
 - [x] Support auto-connect and explicit Connect/Disconnect/Reconnect.
 - [x] Add a credential-safe live-test panel for runtime connect, transcript sends, avatar state, AI response, and system-error inspection.
+- [x] Constrain the panel, masked-token field, and action rows so long JWTs cannot expand the scroll content or displace/oversize buttons.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
-- [ ] Add a developer status view: `Connecting`/`Waking server`, elapsed connect time, endpoint host, session presence, last event, reconnect attempt, current-turn status, and sanitized error.
+- [x] Add a developer status view for connection state/wake status, endpoint, session/turn state, last inbound/outbound events and UTC times, reconnect attempt, sanitized close result, and safe error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
 
 Exit: a designer can configure and operate the socket without changing code.
@@ -739,6 +777,8 @@ Exit: a designer can configure and operate the socket without changing code.
 - [x] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
 - [x] Redact tokens and authorization material from every path.
 - [x] Do not log full transcripts by default; allow sanitized/truncated development previews.
+- [x] Bound/allowlist backend error identifiers, omit unknown event identifiers and close reasons, hide auth-error text, and strip endpoint user-info/query/fragment from the panel.
+- [x] Revalidate completed inbound handlers against the current connection generation while holding the lifecycle gate before applying terminal state/turn effects.
 - [ ] Add counters for connection duration/cold starts, auth sends/failures, reconnects, messages by type, malformed messages, turn timeouts, and close codes.
 - [x] Require `wss` and normal certificate validation for non-loopback/live endpoints.
 - [x] Observe all async exceptions.
@@ -765,6 +805,7 @@ Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
 - [ ] After backend runtime integration and mock replacement are declared complete, repeat authenticated text-flow acceptance against the documented production services.
 - [ ] Run a contract regression against the finalized communication protocol and fixtures before release.
 - [ ] If Attention Routing, Event Response, or Memory becomes Unity-visible, test only the explicitly documented events and semantics.
+- [ ] Do not treat unwired `speech.*` scaffolding or backend-side OBS scene control as live Unity acceptance criteria until their contracts and deployment topology are approved.
 - [ ] If local backend access is provided, change only the Inspector endpoint to `ws://127.0.0.1:8080/ws` and repeat the socket happy path with local credentials.
 
 Exit: the live endpoint passes warm/cold authenticated tests, and optional local testing requires only the endpoint URL change on the socket client.
@@ -784,6 +825,10 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 - [x] STT 4,000 UTF-8-byte boundary and message 64-KiB boundary.
 - [x] Rate-limit/throttling behavior.
 - [x] State transitions after silent auth success.
+- [x] `AUTH_FAILED` system error and close 4001 enter `AuthRequired`, dispose the socket, and do not retry the unchanged token.
+- [x] Non-auth `system.error` releases the final-turn gate without disconnecting a healthy session.
+- [x] Diagnostic lifecycle/event logs exclude tokens and transcript contents.
+- [x] Responsive panel math keeps fields and button rows inside narrow Game views.
 - [x] Heartbeat cadence and cancellation using a fake clock.
 - [ ] A simulated 50-second pending connect remains `Connecting`, does not time out at 10–15 seconds, and never creates a duplicate connection attempt.
 - [ ] Cancellation and the 75-second transport timeout terminate a delayed connection cleanly without stale callbacks.
@@ -803,8 +848,8 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### Build
 
-- [x] Run the EditMode suite in Unity `6000.3.10f1` (115/115 passing on 2026-07-16).
-- [x] Add and run the PlayMode suite (live-scene smoke test 1/1 passing on 2026-07-16).
+- [x] Run the EditMode suite in Unity `6000.3.10f1` (135/135 passing on 2026-07-17).
+- [x] Add and run the PlayMode suite (live-scene smoke test 1/1 passing on 2026-07-17).
 - [ ] Produce and smoke-test a Windows Standalone development build.
 - [ ] Verify IL2CPP/AOT serialization if Android/iOS becomes in scope.
 - [ ] Add a WebGL transport/build test only if WebGL becomes an approved target.
@@ -845,13 +890,14 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 
 ## Final readiness answer
 
-The Unity current-v2 foundation and dedicated live-test scene are implemented. All 115 EditMode tests and the live-scene PlayMode smoke test pass in Unity. The scene is ready for authenticated happy-path testing as soon as a valid short-lived token and matching avatar UUID are supplied. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
+The Unity current-v2 foundation and dedicated live-test scene are implemented. All 135 EditMode tests and the live-scene PlayMode smoke test pass in Unity. The latest bridge export through `79fbf85` has been compared with the Unity runtime and requires no production-code migration: every deployable v2 field/event is already covered, while OBS and speech/media additions are backend-side, mock, or explicitly unwired. The observed Unity failure was an expired JWT rather than a transport fault; the client now reports it immediately as `AuthRequired`, stops the rejected connection, and requires a newly pasted token. A subsequent fresh-token wire smoke with the same temporary account/avatar completed `stt.final -> avatar.state -> ai.response`, so the live backend and credentials are valid. The remaining live check is to repeat that happy path through the corrected Unity panel. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
 
 The remaining inputs are for integration and release validation:
 
-1. A valid short-lived token and tenant-owned avatar ID/test account for authenticated live testing.
+1. A fresh access token from the existing temporary account immediately before authenticated live testing; the matching avatar UUID already exists.
 2. Exact REST auth/avatar schemas only if Unity must implement register/login/avatar creation.
 3. A separate staging endpoint/account only if staging is required.
 4. Final reconnect/ordering rules before release sign-off.
 5. A real-versus-mock environment matrix and versioned protocol diff/fixtures for any finalized Unity-visible changes.
 6. Confirmation of how the dashboard will display the live Unity avatar and which build/deployment target that requires.
+7. If OBS or `speech.*` enters Unity scope, the media topology and complete versioned contract listed in §6.5.

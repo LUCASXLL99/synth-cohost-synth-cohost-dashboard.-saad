@@ -31,6 +31,7 @@ namespace SynthCohost.Tests.EditMode.Development
             Assert.That(settings.AuthSendTimeout, Is.EqualTo(TimeSpan.FromSeconds(5)));
             Assert.That(settings.FinalTurnResponseTimeout, Is.EqualTo(TimeSpan.FromSeconds(120)));
             Assert.That(settings.HeartbeatInterval, Is.EqualTo(TimeSpan.FromSeconds(20)));
+            Assert.That(settings.DiagnosticLogLevel, Is.EqualTo(DiagnosticLogLevel.Verbose));
         }
 
         [Test]

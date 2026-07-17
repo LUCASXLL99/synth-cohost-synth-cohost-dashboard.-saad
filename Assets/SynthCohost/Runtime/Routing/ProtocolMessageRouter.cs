@@ -59,13 +59,22 @@ namespace SynthCohost.Runtime.Routing
             if (!string.Equals(envelope.SessionId, activeSessionId, StringComparison.Ordinal))
             {
                 diagnostics.Write(DiagnosticLogLevel.Warning, "Protocol", "Dropped a frame for a stale or mismatched session.");
-                return new ProtocolRouteResult(ProtocolRouteStatus.SessionMismatch, envelope.EventType);
+                return new ProtocolRouteResult(
+                    ProtocolRouteStatus.SessionMismatch,
+                    envelope.EventType,
+                    envelope: envelope);
             }
 
             if (!handlers.TryGetValue(envelope.EventType, out var handler))
             {
-                diagnostics.Write(DiagnosticLogLevel.Verbose, "Protocol", $"Ignored unhandled event type '{envelope.EventType}'.");
-                return new ProtocolRouteResult(ProtocolRouteStatus.IgnoredUnknown, envelope.EventType);
+                diagnostics.Write(
+                    DiagnosticLogLevel.Verbose,
+                    "Protocol",
+                    "Ignored an unhandled event type; the untrusted identifier was not logged.");
+                return new ProtocolRouteResult(
+                    ProtocolRouteStatus.IgnoredUnknown,
+                    envelope.EventType,
+                    envelope: envelope);
             }
 
             try
@@ -73,7 +82,10 @@ namespace SynthCohost.Runtime.Routing
                 await dispatcher.InvokeAsync(
                     () => handler.HandleAsync(envelope, cancellationToken),
                     cancellationToken);
-                return new ProtocolRouteResult(ProtocolRouteStatus.Handled, envelope.EventType);
+                return new ProtocolRouteResult(
+                    ProtocolRouteStatus.Handled,
+                    envelope.EventType,
+                    envelope: envelope);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -86,7 +98,10 @@ namespace SynthCohost.Runtime.Routing
                     "Routing",
                     $"Handler for '{envelope.EventType}' failed; receive processing will continue.",
                     exception);
-                return new ProtocolRouteResult(ProtocolRouteStatus.HandlerFailed, envelope.EventType);
+                return new ProtocolRouteResult(
+                    ProtocolRouteStatus.HandlerFailed,
+                    envelope.EventType,
+                    envelope: envelope);
             }
         }
     }

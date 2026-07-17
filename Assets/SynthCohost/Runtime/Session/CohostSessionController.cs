@@ -41,7 +41,6 @@ namespace SynthCohost.Runtime.Session
         private string sessionId;
         private int connectionGeneration;
         private int reconnectAttempt;
-        private bool authRefreshRetryUsed;
         private bool sessionMismatchRetryUsed;
         private bool stopRequested;
         private bool disposed;
@@ -84,7 +83,6 @@ namespace SynthCohost.Runtime.Session
         {
             ThrowIfDisposed();
             stopRequested = false;
-            authRefreshRetryUsed = false;
             sessionMismatchRetryUsed = false;
             EnsureLifetimeCancellation();
 
@@ -138,6 +136,7 @@ namespace SynthCohost.Runtime.Session
             CancellationToken cancellationToken = default)
         {
             return SendDomainMessageAsync(
+                ProtocolEventTypes.SttPartial,
                 id => dialect.CreateSttPartial(id, text),
                 cancellationToken);
         }
@@ -154,6 +153,7 @@ namespace SynthCohost.Runtime.Session
             }
 
             var result = await SendDomainMessageAsync(
+                ProtocolEventTypes.SttFinal,
                 id => dialect.CreateSttFinal(id, text),
                 cancellationToken);
             if (!result.Succeeded)
@@ -171,6 +171,7 @@ namespace SynthCohost.Runtime.Session
             CancellationToken cancellationToken = default)
         {
             return SendDomainMessageAsync(
+                ProtocolEventTypes.StateAck,
                 id => dialect.CreateStateAck(id, behavior),
                 cancellationToken);
         }
@@ -191,6 +192,7 @@ namespace SynthCohost.Runtime.Session
                     stateMachine.TryTransition(SessionState.Reconnecting);
                 }
 
+                status.SetError(string.Empty);
                 stateMachine.Transition(SessionState.Connecting);
                 var generation = Interlocked.Increment(ref connectionGeneration);
                 var credentials = await credentialProvider.GetCredentialsAsync(callerCancellation);
@@ -236,6 +238,11 @@ namespace SynthCohost.Runtime.Session
                         }
 
                         await nextTransport.SendTextAsync(authJson, authTimeout.Token);
+                        status.SetLastOutboundEvent(ProtocolEventTypes.Auth);
+                        diagnostics.Write(
+                            DiagnosticLogLevel.Information,
+                            "Protocol",
+                            "Sent 'auth' as the first frame; credentials and payload were not logged.");
                     }
                 }
 
@@ -273,7 +280,10 @@ namespace SynthCohost.Runtime.Session
             {
                 if (IsCurrent(boundTransport, generation))
                 {
-                    diagnostics.Write(DiagnosticLogLevel.Verbose, "Transport", "WebSocket opened.");
+                    diagnostics.Write(
+                        DiagnosticLogLevel.Information,
+                        "Transport",
+                        "WebSocket opened; sending deployed-v2 authentication next.");
                 }
             };
             boundTransport.MessageReceived += raw =>
@@ -283,6 +293,7 @@ namespace SynthCohost.Runtime.Session
                 if (IsCurrent(boundTransport, generation) && !error.IsCancellation)
                 {
                     diagnostics.Write(DiagnosticLogLevel.Warning, "Transport", $"WebSocket {error.Operation} failed.", error.Exception);
+                    status.SetError($"WebSocket {error.Operation} failed. Check the Console for the safe error type.");
                 }
             };
             boundTransport.Closed += close =>
@@ -300,16 +311,83 @@ namespace SynthCohost.Runtime.Session
             }
 
             var result = await router.RouteAsync(rawJson, activeSessionId, cancellationToken);
-            if (!string.IsNullOrEmpty(result.EventType))
+            await lifecycleGate.WaitAsync();
+            try
             {
-                status.SetLastEvent(result.EventType);
+                if (!IsCurrent(source, generation))
+                {
+                    diagnostics.Write(
+                        DiagnosticLogLevel.Verbose,
+                        "Routing",
+                        "Ignored a handler result from a stale connection generation.");
+                    return;
+                }
+
+                var eventLabel = result.Status == ProtocolRouteStatus.IgnoredUnknown
+                    ? "unknown"
+                    : result.EventType;
+                if (!string.IsNullOrEmpty(eventLabel))
+                {
+                    status.SetLastEvent(eventLabel);
+                }
+
+                if (result.WasHandled)
+                {
+                    diagnostics.Write(
+                        DiagnosticLogLevel.Information,
+                        "Protocol",
+                        $"Handled inbound '{eventLabel}' frame.");
+                }
+
+                if ((result.Status == ProtocolRouteStatus.Handled ||
+                     result.Status == ProtocolRouteStatus.HandlerFailed) &&
+                    result.EventType == ProtocolEventTypes.SystemError &&
+                    result.Envelope != null &&
+                    dialect.TryReadSystemError(result.Envelope, out var systemError, out _))
+                {
+                    CompleteFinalTurn();
+                    await HandleCurrentSystemErrorAsync(systemError);
+                    return;
+                }
+
+                if (result.WasHandled && result.EventType == ProtocolEventTypes.AiResponse)
+                {
+                    CompleteFinalTurn();
+                    status.SetError(string.Empty);
+                }
+            }
+            finally
+            {
+                lifecycleGate.Release();
+            }
+        }
+
+        /// <summary>Called only while lifecycleGate is held for the current connection generation.</summary>
+        private async Task HandleCurrentSystemErrorAsync(SystemErrorPayload systemError)
+        {
+            var diagnosticCode = ProtocolSystemErrorCodes.ToDiagnosticLabel(systemError.Code);
+            diagnostics.Write(
+                DiagnosticLogLevel.Warning,
+                "Protocol",
+                $"Backend reported system.error code '{diagnosticCode}'; the message was not logged.");
+
+            if (!ProtocolSystemErrorCodes.IsAuthenticationFailure(systemError.Code))
+            {
+                status.SetError($"Backend reported {diagnosticCode}.");
+                return;
             }
 
-            if (result.WasHandled &&
-                (result.EventType == ProtocolEventTypes.AiResponse || result.EventType == ProtocolEventTypes.SystemError))
-            {
-                CompleteFinalTurn();
-            }
+            diagnostics.Write(
+                DiagnosticLogLevel.Warning,
+                "Authentication",
+                "Backend rejected the access token or avatar ownership (AUTH_FAILED). Paste a fresh token and connect again.");
+            status.SetError("Authentication failed. Paste a fresh access token and confirm the avatar belongs to the same account.");
+            stateMachine.TryTransition(SessionState.AuthRequired);
+            await ClearConnectionAsync(
+                true,
+                CancellationToken.None,
+                "authentication rejected");
+            stateMachine.TryTransition(SessionState.AuthRequired);
         }
 
         private void EnqueueInboundMessage(
@@ -415,12 +493,7 @@ namespace SynthCohost.Runtime.Session
 
                 await ClearConnectionAsync(false, CancellationToken.None);
                 var decision = closePolicy.Decide(closeInfo, stopRequested);
-                if (closeInfo?.Code == 4001 && !authRefreshRetryUsed)
-                {
-                    authRefreshRetryUsed = true;
-                    decision = new ClosePolicyDecision(CloseDirective.Reconnect, TimeSpan.Zero);
-                }
-                else if (closeInfo?.Code == 4002)
+                if (closeInfo?.Code == 4002)
                 {
                     if (!sessionMismatchRetryUsed)
                     {
@@ -432,6 +505,23 @@ namespace SynthCohost.Runtime.Session
                         decision = new ClosePolicyDecision(CloseDirective.Fault, TimeSpan.Zero);
                     }
                 }
+
+                var closeCode = closeInfo?.Code;
+                var closeLevel = closeCode == WebSocketCloseCode.NormalClosure
+                    ? DiagnosticLogLevel.Information
+                    : DiagnosticLogLevel.Warning;
+                diagnostics.Write(
+                    closeLevel,
+                    "Transport",
+                    $"WebSocket closed (code {(closeCode.HasValue ? closeCode.Value.ToString() : "none")}, " +
+                    $"{(closeInfo?.RemoteInitiated == true ? "remote" : "local")}, " +
+                    $"{(closeInfo?.WasClean == true ? "clean" : "unclean")}); policy={decision.Directive}.");
+                status.SetLastClose(
+                    closeCode,
+                    closeInfo?.WasClean == true,
+                    closeInfo?.RemoteInitiated == true,
+                    decision.Directive.ToString());
+
                 switch (decision.Directive)
                 {
                     case CloseDirective.StayDisconnected:
@@ -474,6 +564,7 @@ namespace SynthCohost.Runtime.Session
         private async Task SendHeartbeatAsync(CancellationToken cancellationToken)
         {
             var result = await SendDomainMessageAsync(
+                ProtocolEventTypes.Heartbeat,
                 id => dialect.CreateHeartbeat(id),
                 cancellationToken);
             if (!result.Succeeded)
@@ -483,6 +574,7 @@ namespace SynthCohost.Runtime.Session
         }
 
         private async Task<CohostSendResult> SendDomainMessageAsync(
+            string eventType,
             Func<string, string> createJson,
             CancellationToken cancellationToken)
         {
@@ -526,10 +618,24 @@ namespace SynthCohost.Runtime.Session
 
                     if (!outboundRateLimiter.TryReserve(out var retryAfter))
                     {
+                        diagnostics.Write(
+                            DiagnosticLogLevel.Warning,
+                            "Protocol",
+                            $"Rejected outbound '{eventType}' because the local v2 rate limit was reached.");
                         return CohostSendResult.RateLimited(retryAfter);
                     }
 
                     await activeTransport.SendTextAsync(json, cancellationToken);
+                    status.SetLastOutboundEvent(eventType);
+                    var logLevel = eventType == ProtocolEventTypes.Heartbeat ||
+                                   eventType == ProtocolEventTypes.SttPartial ||
+                                   eventType == ProtocolEventTypes.StateAck
+                        ? DiagnosticLogLevel.Verbose
+                        : DiagnosticLogLevel.Information;
+                    diagnostics.Write(
+                        logLevel,
+                        "Protocol",
+                        $"Sent outbound '{eventType}' frame; payload content was not logged.");
                     return CohostSendResult.Sent();
                 }
                 finally
@@ -600,6 +706,13 @@ namespace SynthCohost.Runtime.Session
             var minimumDelay = minimumFirstDelay;
             while (!cancellationToken.IsCancellationRequested && !stopRequested)
             {
+                if (State == SessionState.AuthRequired ||
+                    State == SessionState.Faulted ||
+                    State == SessionState.Stopping)
+                {
+                    return;
+                }
+
                 var attempt = Interlocked.Increment(ref reconnectAttempt);
                 if (!reconnectController.CanAttempt(attempt))
                 {
@@ -611,11 +724,20 @@ namespace SynthCohost.Runtime.Session
                 status.SetReconnectAttempt(attempt);
                 var delay = reconnectController.GetDelay(attempt, minimumDelay);
                 minimumDelay = TimeSpan.Zero;
+                diagnostics.Write(
+                    DiagnosticLogLevel.Information,
+                    "Reconnect",
+                    $"Reconnect attempt {attempt} is scheduled in {delay.TotalSeconds:0.0}s.");
                 try
                 {
                     await Task.Delay(delay, cancellationToken);
                     await ConnectOnceAsync(true, cancellationToken);
                     if (State == SessionState.Ready)
+                    {
+                        return;
+                    }
+
+                    if (State == SessionState.AuthRequired || State == SessionState.Faulted)
                     {
                         return;
                     }
@@ -627,6 +749,11 @@ namespace SynthCohost.Runtime.Session
                 catch (Exception exception)
                 {
                     diagnostics.Write(DiagnosticLogLevel.Warning, "Reconnect", $"Reconnect attempt {attempt} failed.", exception);
+                    if (State == SessionState.AuthRequired || State == SessionState.Faulted)
+                    {
+                        return;
+                    }
+
                     stateMachine.TryTransition(SessionState.Reconnecting);
                 }
             }
@@ -646,7 +773,10 @@ namespace SynthCohost.Runtime.Session
             }
         }
 
-        private async Task ClearConnectionAsync(bool sendClose, CancellationToken cancellationToken)
+        private async Task ClearConnectionAsync(
+            bool sendClose,
+            CancellationToken cancellationToken,
+            string closeReason = "client shutdown")
         {
             HeartbeatScheduler oldHeartbeat;
             IWebSocketTransport oldTransport;
@@ -679,7 +809,10 @@ namespace SynthCohost.Runtime.Session
                 {
                     try
                     {
-                        await oldTransport.CloseAsync(WebSocketCloseCode.NormalClosure, "client shutdown", cancellationToken);
+                        await oldTransport.CloseAsync(
+                            WebSocketCloseCode.NormalClosure,
+                            closeReason,
+                            cancellationToken);
                     }
                     catch (Exception exception) when (!(exception is OperationCanceledException))
                     {
@@ -733,6 +866,10 @@ namespace SynthCohost.Runtime.Session
         private void OnStateChanged(SessionState previous, SessionState next)
         {
             status.SetState(next, options.Endpoint);
+            diagnostics.Write(
+                DiagnosticLogLevel.Information,
+                "Session",
+                $"State changed: {previous} -> {next}.");
             if (dispatcher == null || dispatcher.IsMainThread)
             {
                 StateChanged?.Invoke(previous, next);

@@ -9,8 +9,52 @@ using UnityEngine;
 
 namespace SynthCohost.Runtime.Development
 {
+    internal static class LiveTestPanelLayout
+    {
+        internal const float ScreenMargin = 16f;
+        internal const float MinimumReadableContentWidth = 220f;
+        internal const float ControlHorizontalReserve = 8f;
+        internal const float ButtonGap = 6f;
+        internal const float StackedButtonThreshold = 390f;
+
+        internal static Rect CalculatePanelRect(float preferredWidth, float screenWidth, float screenHeight)
+        {
+            var availableWidth = Mathf.Max(1f, screenWidth - ScreenMargin * 2f);
+            var availableHeight = Mathf.Max(1f, screenHeight - ScreenMargin * 2f);
+            var width = Mathf.Min(Mathf.Max(320f, preferredWidth), availableWidth);
+            return new Rect(ScreenMargin, ScreenMargin, width, availableHeight);
+        }
+
+        internal static float CalculateContentWidth(float panelWidth)
+        {
+            // Room for the window padding and a vertical scrollbar; every child gets this cap so
+            // a long masked JWT or transcript cannot widen the scroll view horizontally.
+            return Mathf.Max(1f, panelWidth - 40f);
+        }
+
+        internal static bool ShouldStackButtons(float availableContentWidth)
+        {
+            return availableContentWidth < StackedButtonThreshold;
+        }
+
+        internal static float CalculateControlWidth(float contentWidth)
+        {
+            // IMGUI control styles add horizontal margins outside an explicit Width option.
+            // Reserve room for those margins so the scroll-view content never grows sideways.
+            return Mathf.Max(1f, contentWidth - ControlHorizontalReserve);
+        }
+
+        internal static float CalculateButtonWidth(float availableContentWidth, int buttonCount)
+        {
+            var count = Mathf.Max(1, buttonCount);
+            return Mathf.Max(
+                1f,
+                (availableContentWidth - ButtonGap * (count - 1)) / count);
+        }
+    }
+
     /// <summary>
-    /// Development harness for exercising the deployed v2 text flow from SampleScene. Credentials
+    /// Development harness for exercising the deployed v2 text flow from the dedicated live-test scene. Credentials
     /// are private, non-serialized runtime values and are never written to the scene or settings.
     /// Remove this component from production scenes.
     /// </summary>
@@ -18,7 +62,7 @@ namespace SynthCohost.Runtime.Development
     [AddComponentMenu("Synth Cohost/Development/Live Test Panel")]
     public sealed class SynthCohostLiveTestPanel : MonoBehaviour
     {
-        [Header("Wired by the SampleScene setup")]
+        [Header("Wired by the live-test scene setup")]
         [SerializeField] private SynthCohostClientBehaviour client;
         [SerializeField] private SynthCohostConnectionSettings settings;
         [SerializeField] private LiveTestAvatarBehaviorAdapter avatarAdapter;
@@ -41,6 +85,9 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private GUIStyle titleStyle;
         [NonSerialized] private GUIStyle sectionStyle;
         [NonSerialized] private GUIStyle wrappedLabelStyle;
+        [NonSerialized] private float contentWidth = LiveTestPanelLayout.MinimumReadableContentWidth;
+        [NonSerialized] private float controlWidth =
+            LiveTestPanelLayout.MinimumReadableContentWidth - LiveTestPanelLayout.ControlHorizontalReserve;
 
         private bool IsBusy => activeOperation != null;
 
@@ -103,10 +150,19 @@ namespace SynthCohost.Runtime.Development
         {
             EnsureStyles();
 
-            var width = Mathf.Min(Mathf.Max(420f, panelWidth), Mathf.Max(420f, Screen.width - 32f));
-            var height = Mathf.Max(300f, Screen.height - 32f);
-            GUILayout.BeginArea(new Rect(16f, 16f, width, height), GUI.skin.window);
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition);
+            var panelRect = LiveTestPanelLayout.CalculatePanelRect(panelWidth, Screen.width, Screen.height);
+            contentWidth = LiveTestPanelLayout.CalculateContentWidth(panelRect.width);
+            controlWidth = LiveTestPanelLayout.CalculateControlWidth(contentWidth);
+            scrollPosition.x = 0f;
+
+            GUILayout.BeginArea(panelRect, GUI.skin.window);
+            scrollPosition = GUILayout.BeginScrollView(
+                scrollPosition,
+                GUIStyle.none,
+                GUI.skin.verticalScrollbar,
+                GUILayout.ExpandWidth(true),
+                GUILayout.ExpandHeight(true));
+            GUILayout.BeginVertical(GUILayout.Width(contentWidth));
 
             GUILayout.Label("Synth Cohost v2 Live Test", titleStyle);
             GUILayout.Label(
@@ -119,6 +175,7 @@ namespace SynthCohost.Runtime.Development
             DrawTranscriptControls();
             DrawResults();
 
+            GUILayout.EndVertical();
             GUILayout.EndScrollView();
             GUILayout.EndArea();
         }
@@ -127,30 +184,64 @@ namespace SynthCohost.Runtime.Development
         {
             GUILayout.Space(8f);
             GUILayout.Label("Connection", sectionStyle);
-            GUILayout.Label($"Endpoint: {(settings != null ? settings.EndpointUrl : "(settings missing)")}");
+            var endpointDisplay = settings != null && settings.TryGetEndpoint(out var endpoint, out _)
+                ? FormatEndpointForDisplay(endpoint)
+                : "(settings missing or endpoint invalid)";
+            GUILayout.Label(
+                $"Endpoint: {endpointDisplay}",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
 
             var status = client != null ? client.Status : null;
             var state = client != null ? client.State.ToString() : "Client missing";
             if (status != null && status.IsWakingServer)
             {
-                state += " (Waking server — a free-tier cold start can take about 50 seconds)";
+                state += " (Waking server - a free-tier cold start can take about 50 seconds)";
+            }
+            else if (status != null && client != null && client.State == SessionState.Ready)
+            {
+                state += string.IsNullOrEmpty(status.LastEventType)
+                    ? " (auth sent; current v2 has no positive session.ready acknowledgement)"
+                    : " (backend activity received)";
             }
 
-            GUILayout.Label($"State: {state}", wrappedLabelStyle);
+            GUILayout.Label($"State: {state}", wrappedLabelStyle, GUILayout.Width(controlWidth));
             if (status != null)
             {
                 GUILayout.Label(
-                    $"Session: {(status.HasSession ? "yes" : "no")}   " +
+                    $"Client session allocated: {(status.HasSession ? "yes" : "no")}   " +
                     $"Turn active: {(status.HasActiveTurn ? "yes" : "no")}   " +
-                    $"Reconnect attempt: {status.ReconnectAttempt}");
-                GUILayout.Label($"Last event: {ValueOrNone(status.LastEventType)}");
+                    $"Reconnect attempt: {status.ReconnectAttempt}",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+                GUILayout.Label(
+                    $"Last inbound: {FormatActivity(status.LastEventType, status.LastInboundAtUtc)}",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+                GUILayout.Label(
+                    $"Last outbound: {FormatActivity(status.LastOutboundEventType, status.LastOutboundAtUtc)}",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+                if (!string.IsNullOrWhiteSpace(status.LastCloseSummary))
+                {
+                    GUILayout.Label(
+                        $"Last close: {status.LastCloseSummary}",
+                        wrappedLabelStyle,
+                        GUILayout.Width(controlWidth));
+                }
                 if (!string.IsNullOrWhiteSpace(status.SanitizedError))
                 {
-                    GUILayout.Label($"Client error: {status.SanitizedError}", wrappedLabelStyle);
+                    GUILayout.Label(
+                        $"Client error: {status.SanitizedError}",
+                        wrappedLabelStyle,
+                        GUILayout.Width(controlWidth));
                 }
             }
 
-            GUILayout.Label($"Last operation: {lastOperation}", wrappedLabelStyle);
+            GUILayout.Label(
+                $"Last operation: {lastOperation}",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
         }
 
         private void DrawCredentials()
@@ -158,73 +249,94 @@ namespace SynthCohost.Runtime.Development
             GUILayout.Space(8f);
             GUILayout.Label("Runtime credentials", sectionStyle);
             GUILayout.Label("Access token (masked)");
-            accessToken = GUILayout.PasswordField(accessToken ?? string.Empty, '*');
+            accessToken = GUILayout.PasswordField(
+                accessToken ?? string.Empty,
+                '*',
+                GUILayout.Width(controlWidth));
             GUILayout.Label("Avatar UUID");
-            avatarId = GUILayout.TextField(avatarId ?? string.Empty);
+            avatarId = GUILayout.TextField(avatarId ?? string.Empty, GUILayout.Width(controlWidth));
         }
 
         private void DrawConnectionControls()
         {
-            GUILayout.BeginHorizontal();
+            var state = client != null ? client.State : SessionState.Disconnected;
+            var canConnect = !IsBusy && client != null &&
+                             (state == SessionState.Disconnected ||
+                              state == SessionState.AuthRequired ||
+                              state == SessionState.Faulted);
+            var canReconnect = !IsBusy && client != null && state == SessionState.Ready;
+            var canDisconnect = client != null && (IsBusy || state != SessionState.Disconnected);
 
-            var previousEnabled = GUI.enabled;
-            GUI.enabled = previousEnabled && !IsBusy && client != null && client.State != SessionState.Ready;
-            if (GUILayout.Button("Connect", GUILayout.Height(30f)))
+            if (LiveTestPanelLayout.ShouldStackButtons(controlWidth))
             {
-                Connect();
+                if (DrawActionButton("Connect", canConnect, controlWidth)) Connect();
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton("Reconnect", canReconnect, controlWidth)) Reconnect();
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton(IsBusy ? "Cancel / Disconnect" : "Disconnect", canDisconnect, controlWidth)) Disconnect();
+            }
+            else
+            {
+                var buttonWidth = LiveTestPanelLayout.CalculateButtonWidth(controlWidth, 3);
+                GUILayout.BeginHorizontal(GUILayout.Width(controlWidth));
+                if (DrawActionButton("Connect", canConnect, buttonWidth)) Connect();
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton("Reconnect", canReconnect, buttonWidth)) Reconnect();
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton(IsBusy ? "Cancel / Disconnect" : "Disconnect", canDisconnect, buttonWidth)) Disconnect();
+                GUILayout.EndHorizontal();
             }
 
-            GUI.enabled = previousEnabled && !IsBusy && client != null && client.State != SessionState.Disconnected;
-            if (GUILayout.Button("Reconnect", GUILayout.Height(30f)))
+            if (state == SessionState.AuthRequired)
             {
-                Reconnect();
+                GUILayout.Label(
+                    "Authentication was rejected. Paste a fresh token above and use Connect; Reconnect will not reuse the expired token.",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
             }
-
-            GUI.enabled = previousEnabled && client != null &&
-                          (IsBusy || client.State != SessionState.Disconnected);
-            if (GUILayout.Button(IsBusy ? "Cancel / Disconnect" : "Disconnect", GUILayout.Height(30f)))
-            {
-                Disconnect();
-            }
-
-            GUI.enabled = previousEnabled;
-            GUILayout.EndHorizontal();
         }
 
         private void DrawTranscriptControls()
         {
             GUILayout.Space(8f);
             GUILayout.Label("Transcript", sectionStyle);
-            transcript = GUILayout.TextArea(transcript ?? string.Empty, GUILayout.MinHeight(70f));
+            transcript = GUILayout.TextArea(
+                transcript ?? string.Empty,
+                GUILayout.Width(controlWidth),
+                GUILayout.MinHeight(70f));
 
-            GUILayout.BeginHorizontal();
-            var previousEnabled = GUI.enabled;
-            GUI.enabled = previousEnabled && !IsBusy && client != null &&
+            var canSend = !IsBusy && client != null &&
                           client.State == SessionState.Ready &&
                           !(client.Status?.HasActiveTurn ?? false);
-
-            if (GUILayout.Button("Send Partial", GUILayout.Height(30f)))
+            if (LiveTestPanelLayout.ShouldStackButtons(controlWidth))
             {
-                SendTranscript(false);
+                if (DrawActionButton("Send Partial", canSend, controlWidth)) SendTranscript(false);
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton("Send Final", canSend, controlWidth)) SendTranscript(true);
+            }
+            else
+            {
+                var buttonWidth = LiveTestPanelLayout.CalculateButtonWidth(controlWidth, 2);
+                GUILayout.BeginHorizontal(GUILayout.Width(controlWidth));
+                if (DrawActionButton("Send Partial", canSend, buttonWidth)) SendTranscript(false);
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton("Send Final", canSend, buttonWidth)) SendTranscript(true);
+                GUILayout.EndHorizontal();
             }
 
-            if (GUILayout.Button("Send Final", GUILayout.Height(30f)))
-            {
-                SendTranscript(true);
-            }
-
-            GUI.enabled = previousEnabled;
-            GUILayout.EndHorizontal();
-            GUILayout.Label("Only one final turn can be active at a time.", wrappedLabelStyle);
+            GUILayout.Label(
+                "Only one final turn can be active at a time.",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
         }
 
         private void DrawResults()
         {
             GUILayout.Space(8f);
             GUILayout.Label("Received", sectionStyle);
-            GUILayout.Label($"Avatar behavior (simulated adapter): {lastAvatarBehavior}", wrappedLabelStyle);
-            GUILayout.Label($"AI response: {lastAiResponse}", wrappedLabelStyle);
-            GUILayout.Label($"System error: {lastSystemError}", wrappedLabelStyle);
+            GUILayout.Label($"Avatar behavior (simulated adapter): {lastAvatarBehavior}", wrappedLabelStyle, GUILayout.Width(controlWidth));
+            GUILayout.Label($"AI response: {lastAiResponse}", wrappedLabelStyle, GUILayout.Width(controlWidth));
+            GUILayout.Label($"System error: {lastSystemError}", wrappedLabelStyle, GUILayout.Width(controlWidth));
         }
 
         private async void Connect()
@@ -246,9 +358,10 @@ namespace SynthCohost.Runtime.Development
                 var token = accessToken;
                 client.SetRuntimeCredentials(token, parsedAvatarId);
                 accessToken = string.Empty;
+                lastSystemError = "(none)";
                 await client.ConnectAsync(operation.Token);
                 lastOperation = client.State == SessionState.Ready
-                    ? "WebSocket opened and the v2 auth frame was sent. State is Ready."
+                    ? "WebSocket opened and auth was sent. Ready is provisional because current v2 has no session.ready response."
                     : $"Connection attempt completed; current state is {client.State}. Use State as the source of truth.";
             }
             catch (OperationCanceledException)
@@ -257,7 +370,7 @@ namespace SynthCohost.Runtime.Development
             }
             catch (Exception exception)
             {
-                lastOperation = $"Connect failed: {exception.Message}";
+                lastOperation = $"Connect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
             }
             finally
             {
@@ -273,6 +386,25 @@ namespace SynthCohost.Runtime.Development
                 return;
             }
 
+            if (client.State == SessionState.AuthRequired)
+            {
+                lastOperation = "Paste a fresh token and use Connect; Reconnect will not reuse rejected credentials.";
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(accessToken))
+            {
+                if (!TryValidateCredentials(out var parsedAvatarId, out var validationError))
+                {
+                    lastOperation = validationError;
+                    return;
+                }
+
+                client.SetRuntimeCredentials(accessToken, parsedAvatarId);
+                accessToken = string.Empty;
+                lastSystemError = "(none)";
+            }
+
             var operation = BeginOperation("Reconnecting with the current runtime credentials...");
             if (operation == null)
             {
@@ -282,7 +414,9 @@ namespace SynthCohost.Runtime.Development
             try
             {
                 await client.ReconnectAsync(operation.Token);
-                lastOperation = "Reconnected with a fresh session ID and sent auth.";
+                lastOperation = client.State == SessionState.Ready
+                    ? "Reconnected with a fresh session ID and sent auth; Ready remains provisional until backend activity."
+                    : $"Reconnect completed with state {client.State}.";
             }
             catch (OperationCanceledException)
             {
@@ -290,7 +424,7 @@ namespace SynthCohost.Runtime.Development
             }
             catch (Exception exception)
             {
-                lastOperation = $"Reconnect failed: {exception.Message}";
+                lastOperation = $"Reconnect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
             }
             finally
             {
@@ -314,7 +448,7 @@ namespace SynthCohost.Runtime.Development
             }
             catch (Exception exception)
             {
-                lastOperation = $"Disconnect failed: {exception.Message}";
+                lastOperation = $"Disconnect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
             }
         }
 
@@ -346,7 +480,7 @@ namespace SynthCohost.Runtime.Development
             }
             catch (Exception exception)
             {
-                lastOperation = $"Send failed: {exception.Message}";
+                lastOperation = $"Send failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
             }
             finally
             {
@@ -426,7 +560,79 @@ namespace SynthCohost.Runtime.Development
 
         private void OnSystemErrorReceived(SystemErrorPayload error)
         {
-            lastSystemError = $"{error.Code}: {error.Message}";
+            if (ProtocolSystemErrorCodes.IsAuthenticationFailure(error?.Code))
+            {
+                lastSystemError =
+                    "AUTH_FAILED: Authentication rejected. The backend message was hidden because it may contain credential details.";
+                lastOperation = "Authentication rejected. Paste a fresh access token and click Connect.";
+                return;
+            }
+
+            var code = ProtocolSystemErrorCodes.ToDiagnosticLabel(error?.Code);
+            var message = SanitizeForDisplay(error?.Message, 240);
+            lastSystemError = $"{code}: {message}";
+        }
+
+        private static bool DrawActionButton(string label, bool enabled, float width)
+        {
+            var previousEnabled = GUI.enabled;
+            GUI.enabled = previousEnabled && enabled;
+            var clicked = GUILayout.Button(
+                label,
+                GUILayout.Width(width),
+                GUILayout.Height(30f));
+            GUI.enabled = previousEnabled;
+            return clicked;
+        }
+
+        private static string FormatActivity(string eventType, DateTimeOffset? timestampUtc)
+        {
+            if (string.IsNullOrWhiteSpace(eventType))
+            {
+                return "(none)";
+            }
+
+            return timestampUtc.HasValue
+                ? $"{eventType} at {timestampUtc.Value:HH:mm:ss} UTC"
+                : eventType;
+        }
+
+        internal static string FormatEndpointForDisplay(Uri endpoint)
+        {
+            if (endpoint == null || !endpoint.IsAbsoluteUri)
+            {
+                return "(invalid endpoint)";
+            }
+
+            var host = endpoint.HostNameType == UriHostNameType.IPv6
+                ? $"[{endpoint.Host}]"
+                : endpoint.IdnHost;
+            var port = endpoint.IsDefaultPort ? string.Empty : $":{endpoint.Port}";
+            var path = string.IsNullOrEmpty(endpoint.AbsolutePath) ? "/" : endpoint.AbsolutePath;
+            return $"{endpoint.Scheme}://{host}{port}{path}";
+        }
+
+        internal static string SanitizeForDisplay(string value, int maximumCharacters)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "(none)";
+            }
+
+            var limit = Math.Max(1, maximumCharacters);
+            var characters = value.ToCharArray();
+            for (var index = 0; index < characters.Length; index++)
+            {
+                if (char.IsControl(characters[index]))
+                {
+                    characters[index] = ' ';
+                }
+            }
+
+            var sanitized = new string(characters).Trim();
+            return sanitized.Length <= limit
+                ? sanitized
+                : sanitized.Substring(0, limit) + "...";
         }
 
         private static string FormatSendResult(bool final, CohostSendResult result)
@@ -442,11 +648,6 @@ namespace SynthCohost.Runtime.Development
                 ? $" Retry after approximately {result.RetryAfter.TotalSeconds:0.0}s."
                 : string.Empty;
             return $"Send rejected ({result.Status}): {result.Message}{retry}";
-        }
-
-        private static string ValueOrNone(string value)
-        {
-            return string.IsNullOrWhiteSpace(value) ? "(none)" : value;
         }
 
         private void EnsureStyles()

@@ -20,6 +20,10 @@ namespace SynthCohost.Runtime.Diagnostics
         public bool HasActiveTurn { get; private set; }
         public int ReconnectAttempt { get; private set; }
         public string LastEventType { get; private set; } = string.Empty;
+        public string LastOutboundEventType { get; private set; } = string.Empty;
+        public DateTimeOffset? LastInboundAtUtc { get; private set; }
+        public DateTimeOffset? LastOutboundAtUtc { get; private set; }
+        public string LastCloseSummary { get; private set; } = string.Empty;
         public string SanitizedError { get; private set; } = string.Empty;
         public DateTimeOffset? ConnectingSince { get; private set; }
 
@@ -40,6 +44,10 @@ namespace SynthCohost.Runtime.Diagnostics
                 if (state == SessionState.Connecting)
                 {
                     ConnectingSince = DateTimeOffset.UtcNow;
+                    LastEventType = string.Empty;
+                    LastInboundAtUtc = null;
+                    LastOutboundEventType = string.Empty;
+                    LastOutboundAtUtc = null;
                 }
                 else if (state != SessionState.Reconnecting)
                 {
@@ -82,6 +90,33 @@ namespace SynthCohost.Runtime.Diagnostics
             Publish(() =>
             {
                 LastEventType = eventType ?? string.Empty;
+                LastInboundAtUtc = DateTimeOffset.UtcNow;
+                Changed?.Invoke();
+            });
+        }
+
+        internal void SetLastOutboundEvent(string eventType)
+        {
+            Publish(() =>
+            {
+                LastOutboundEventType = eventType ?? string.Empty;
+                LastOutboundAtUtc = DateTimeOffset.UtcNow;
+                Changed?.Invoke();
+            });
+        }
+
+        internal void SetLastClose(
+            int? code,
+            bool wasClean,
+            bool remoteInitiated,
+            string directive)
+        {
+            Publish(() =>
+            {
+                var codeText = code.HasValue ? code.Value.ToString() : "none";
+                LastCloseSummary =
+                    $"code {codeText}; {(remoteInitiated ? "remote" : "local")}; " +
+                    $"{(wasClean ? "clean" : "unclean")}; {directive ?? "unknown policy"}";
                 Changed?.Invoke();
             });
         }

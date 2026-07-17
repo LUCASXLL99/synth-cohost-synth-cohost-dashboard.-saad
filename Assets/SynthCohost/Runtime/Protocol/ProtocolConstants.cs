@@ -60,4 +60,45 @@ namespace SynthCohost.Protocol
             }
         }
     }
+
+    /// <summary>Known server error codes with session-level meaning for the deployed v2 client.</summary>
+    public static class ProtocolSystemErrorCodes
+    {
+        public const string Unrecognized = "UNRECOGNIZED_SYSTEM_ERROR";
+        public const string AuthFailed = "AUTH_FAILED";
+        public const string AiGenerationFailed = "AI_GENERATION_FAILED";
+
+        public static bool IsAuthenticationFailure(string code)
+        {
+            return string.Equals(code, AuthFailed, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Returns a bounded protocol-style identifier for logs/UI. Arbitrary backend text is not
+        /// allowed through this path because error fields must never become a log-injection or
+        /// accidental credential-disclosure channel.
+        /// </summary>
+        public static string ToDiagnosticLabel(string code)
+        {
+            const int maximumLength = 64;
+            if (string.IsNullOrEmpty(code) || code.Length > maximumLength)
+            {
+                return Unrecognized;
+            }
+
+            for (var index = 0; index < code.Length; index++)
+            {
+                var character = code[index];
+                var allowed = character == '_' ||
+                              character >= 'A' && character <= 'Z' ||
+                              character >= '0' && character <= '9';
+                if (!allowed)
+                {
+                    return Unrecognized;
+                }
+            }
+
+            return code;
+        }
+    }
 }

@@ -52,6 +52,25 @@ namespace SynthCohost.Tests.Protocol
             Assert.That(payload.Message, Is.EqualTo("Unable to generate a response."));
         }
 
+        [TestCase("AUTH_FAILED", "AUTH_FAILED")]
+        [TestCase("AI_GENERATION_FAILED", "AI_GENERATION_FAILED")]
+        [TestCase("AUTH_FAILED\nforged-log", ProtocolSystemErrorCodes.Unrecognized)]
+        [TestCase("looks.like-a-token", ProtocolSystemErrorCodes.Unrecognized)]
+        public void SystemErrorDiagnosticLabel_AllowsOnlyBoundedProtocolIdentifiers(
+            string code,
+            string expected)
+        {
+            Assert.That(ProtocolSystemErrorCodes.ToDiagnosticLabel(code), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void SystemErrorDiagnosticLabel_RejectsOversizedIdentifier()
+        {
+            Assert.That(
+                ProtocolSystemErrorCodes.ToDiagnosticLabel(new string('A', 65)),
+                Is.EqualTo(ProtocolSystemErrorCodes.Unrecognized));
+        }
+
         [Test]
         public void UnknownEventType_ProducesSafeUntypedEnvelope()
         {

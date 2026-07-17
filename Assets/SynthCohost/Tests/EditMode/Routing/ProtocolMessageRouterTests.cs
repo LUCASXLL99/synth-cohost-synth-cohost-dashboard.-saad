@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using SynthCohost.Protocol;
+using SynthCohost.Runtime.Configuration;
 using SynthCohost.Runtime.Diagnostics;
 using SynthCohost.Runtime.Routing;
 
@@ -36,6 +37,27 @@ namespace SynthCohost.Tests.EditMode.Routing
                 throw new InvalidOperationException("presentation failed");
         }
 
+        private sealed class RecordingDiagnostics : ICohostDiagnostics
+        {
+            public event Action<CohostDiagnosticEvent> EventWritten;
+            public string LastMessage { get; private set; } = string.Empty;
+
+            public void Write(
+                DiagnosticLogLevel level,
+                string category,
+                string message,
+                Exception exception = null)
+            {
+                LastMessage = message;
+                EventWritten?.Invoke(new CohostDiagnosticEvent(
+                    DateTimeOffset.UtcNow,
+                    level,
+                    category,
+                    message,
+                    exception?.GetType().Name));
+            }
+        }
+
         [Test]
         public async Task KnownCurrentSessionMessageIsHandled()
         {
@@ -45,18 +67,23 @@ namespace SynthCohost.Tests.EditMode.Routing
             var result = await router.RouteAsync(AiResponseJson("session-a"), "session-a", CancellationToken.None);
 
             Assert.That(result.Status, Is.EqualTo(ProtocolRouteStatus.Handled));
+            Assert.That(result.Envelope, Is.Not.Null);
+            Assert.That(result.Envelope.EventType, Is.EqualTo(ProtocolEventTypes.AiResponse));
             Assert.That(handler.Count, Is.EqualTo(1));
         }
 
         [Test]
         public async Task UnknownEventIsIgnoredForForwardCompatibility()
         {
-            var router = Create();
-            const string json = "{\"v\":2,\"type\":\"future.event\",\"session_id\":\"session-a\",\"ts\":\"2026-07-14T00:00:00Z\",\"payload\":{}}";
+            const string untrustedIdentifier = "future.SECRET_IDENTIFIER";
+            var diagnostics = new RecordingDiagnostics();
+            var router = Create(diagnostics);
+            const string json = "{\"v\":2,\"type\":\"future.SECRET_IDENTIFIER\",\"session_id\":\"session-a\",\"ts\":\"2026-07-14T00:00:00Z\",\"payload\":{}}";
 
             var result = await router.RouteAsync(json, "session-a", CancellationToken.None);
 
             Assert.That(result.Status, Is.EqualTo(ProtocolRouteStatus.IgnoredUnknown));
+            Assert.That(diagnostics.LastMessage, Does.Not.Contain(untrustedIdentifier));
         }
 
         [Test]
@@ -83,11 +110,18 @@ namespace SynthCohost.Tests.EditMode.Routing
 
         private static ProtocolMessageRouter Create(params IProtocolMessageHandler[] handlers)
         {
+            return Create(new NullCohostDiagnostics(), handlers);
+        }
+
+        private static ProtocolMessageRouter Create(
+            ICohostDiagnostics diagnostics,
+            params IProtocolMessageHandler[] handlers)
+        {
             return new ProtocolMessageRouter(
                 new ProtocolCodec(),
                 new ImmediateDispatcher(),
                 handlers,
-                new NullCohostDiagnostics());
+                diagnostics);
         }
 
         private static string AiResponseJson(string sessionId)

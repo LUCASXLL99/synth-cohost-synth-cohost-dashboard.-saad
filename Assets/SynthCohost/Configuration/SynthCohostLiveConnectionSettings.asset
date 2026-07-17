@@ -24,4 +24,4 @@ MonoBehaviour:
     maximumDelaySeconds: 30
     jitterRatio: 0.2
     maximumAttempts: 0
-  diagnosticLogLevel: 3
+  diagnosticLogLevel: 4

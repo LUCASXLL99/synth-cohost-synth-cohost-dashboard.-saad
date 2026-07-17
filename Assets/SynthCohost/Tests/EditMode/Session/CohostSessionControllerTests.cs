@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -180,6 +181,300 @@ namespace SynthCohost.Tests.EditMode.Session
             }
         }
 
+        [Test]
+        public async Task AuthFailedSystemError_ImmediatelyRequiresFreshCredentialsAndClearsSession()
+        {
+            var harness = SessionHarness.Create(new NoOpSystemErrorHandler());
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var socket = harness.Factory.GetTransport(0);
+                AssertAuthFrame(harness.Codec, socket.SentMessages[0], out var authEnvelope);
+
+                socket.EmitMessage(SystemErrorJson(
+                    authEnvelope.SessionId,
+                    ProtocolSystemErrorCodes.AuthFailed,
+                    "token expired or malformed: ExpiredSignature"));
+
+                await WaitUntilAsync(
+                    () => harness.Controller.State == SessionState.AuthRequired &&
+                          !harness.Controller.Status.HasSession,
+                    "AUTH_FAILED did not tear down the provisional Ready session.");
+
+                Assert.That(socket.State, Is.EqualTo(TransportState.Disposed));
+                Assert.That(harness.Factory.Count, Is.EqualTo(1), "Rejected credentials must not be retried unchanged.");
+                Assert.That(harness.Controller.Status.SanitizedError, Does.Contain("Authentication failed"));
+
+                var rejectedSend = await harness.Controller.SendPartialTranscriptAsync("must not send");
+                Assert.That(rejectedSend.Status, Is.EqualTo(CohostSendStatus.NotReady));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task AiGenerationSystemError_CompletesTurnButKeepsAuthenticatedSocketReady()
+        {
+            var harness = SessionHarness.Create(new NoOpSystemErrorHandler());
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var socket = harness.Factory.GetTransport(0);
+                AssertAuthFrame(harness.Codec, socket.SentMessages[0], out var authEnvelope);
+                Assert.That((await harness.Controller.SendFinalTranscriptAsync("hello")).Succeeded, Is.True);
+                Assert.That(harness.Controller.Status.HasActiveTurn, Is.True);
+
+                socket.EmitMessage(SystemErrorJson(
+                    authEnvelope.SessionId,
+                    ProtocolSystemErrorCodes.AiGenerationFailed,
+                    "Unable to generate a response."));
+
+                await WaitUntilAsync(
+                    () => !harness.Controller.Status.HasActiveTurn &&
+                          harness.Controller.Status.LastEventType == ProtocolEventTypes.SystemError,
+                    "The final-turn gate was not released by the terminal generation error.");
+
+                Assert.That(harness.Controller.State, Is.EqualTo(SessionState.Ready));
+                Assert.That(harness.Controller.Status.HasSession, Is.True);
+                Assert.That(socket.State, Is.EqualTo(TransportState.Open));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task Close4001_RequiresAuthenticationWithoutRetryingTheSameProvider()
+        {
+            var diagnostics = new RecordingDiagnostics();
+            var harness = SessionHarness.CreateWithDiagnostics(diagnostics);
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                harness.Factory.GetTransport(0).EmitClosed(4001, "SECRET_CLOSE_REASON");
+
+                await WaitUntilAsync(
+                    () => harness.Controller.State == SessionState.AuthRequired,
+                    "Close 4001 did not enter AuthRequired.");
+
+                Assert.That(harness.Factory.Count, Is.EqualTo(1));
+                Assert.That(harness.Controller.Status.LastCloseSummary, Does.Contain("code 4001"));
+                Assert.That(harness.Controller.Status.LastCloseSummary, Does.Contain("RequireAuthentication"));
+                Assert.That(diagnostics.Messages, Has.None.Contains("SECRET_CLOSE_REASON"));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task DelayedOldSystemError_CannotRejectOrCompleteANewerSessionTurn()
+        {
+            var diagnostics = new RecordingDiagnostics();
+            var handler = new BlockingSystemErrorHandler();
+            var harness = SessionHarness.CreateWithDiagnostics(diagnostics, handler);
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var oldTransport = harness.Factory.GetTransport(0);
+                AssertAuthFrame(harness.Codec, oldTransport.SentMessages[0], out var oldAuth);
+                oldTransport.EmitMessage(SystemErrorJson(
+                    oldAuth.SessionId,
+                    ProtocolSystemErrorCodes.AuthFailed,
+                    "expired"));
+                await AwaitWithTimeoutAsync(handler.Started, "The old system-error handler did not start.");
+
+                oldTransport.EmitClosed(4003, "heartbeat timeout");
+                await WaitUntilAsync(
+                    () => harness.Factory.Count == 2 && harness.Controller.State == SessionState.Ready,
+                    "The replacement connection did not become Ready.");
+                Assert.That(
+                    (await harness.Controller.SendFinalTranscriptAsync("new-session turn")).Succeeded,
+                    Is.True);
+                Assert.That(harness.Controller.Status.HasActiveTurn, Is.True);
+
+                handler.Release();
+                await AwaitWithTimeoutAsync(handler.Finished, "The old system-error handler did not finish.");
+                await WaitUntilAsync(
+                    () => diagnostics.Messages.Any(message =>
+                        message.Contains("stale connection generation")),
+                    "The stale route result was not observed.");
+
+                Assert.That(harness.Controller.State, Is.EqualTo(SessionState.Ready));
+                Assert.That(harness.Controller.Status.HasActiveTurn, Is.True);
+                Assert.That(harness.Factory.Count, Is.EqualTo(2));
+            }
+            finally
+            {
+                handler.Release();
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task AuthFailedThenClose4001_RemainsAuthRequiredWithoutRetry()
+        {
+            var harness = SessionHarness.Create(new NoOpSystemErrorHandler());
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var rejectedTransport = harness.Factory.GetTransport(0);
+                AssertAuthFrame(harness.Codec, rejectedTransport.SentMessages[0], out var auth);
+                rejectedTransport.EmitMessage(SystemErrorJson(
+                    auth.SessionId,
+                    ProtocolSystemErrorCodes.AuthFailed,
+                    "expired"));
+                await WaitUntilAsync(
+                    () => harness.Controller.State == SessionState.AuthRequired &&
+                          rejectedTransport.State == TransportState.Disposed,
+                    "AUTH_FAILED did not finish rejected-session cleanup.");
+
+                rejectedTransport.EmitClosed(4001, "expired");
+                await Task.Yield();
+
+                Assert.That(harness.Controller.State, Is.EqualTo(SessionState.AuthRequired));
+                Assert.That(harness.Factory.Count, Is.EqualTo(1));
+                Assert.That(harness.Controller.Status.HasSession, Is.False);
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task UntrustedSystemErrorFields_AreNotWrittenToCoreDiagnosticsOrStatus()
+        {
+            const string secret = "SECRET_IN_UNTRUSTED_ERROR";
+            var diagnostics = new RecordingDiagnostics();
+            var harness = SessionHarness.CreateWithDiagnostics(
+                diagnostics,
+                new NoOpSystemErrorHandler());
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var transport = harness.Factory.GetTransport(0);
+                AssertAuthFrame(harness.Codec, transport.SentMessages[0], out var auth);
+                transport.EmitMessage(SystemErrorJson(
+                    auth.SessionId,
+                    "INVALID\\n" + secret,
+                    secret));
+                await WaitUntilAsync(
+                    () => harness.Controller.Status.SanitizedError.Contains(
+                        ProtocolSystemErrorCodes.Unrecognized),
+                    "The unrecognized error was not surfaced safely.");
+
+                Assert.That(diagnostics.Messages, Has.None.Contains(secret));
+                Assert.That(harness.Controller.Status.SanitizedError, Does.Not.Contain(secret));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task FreshConnectFromAuthRequired_ClearsStaleAuthenticationError()
+        {
+            var harness = SessionHarness.Create();
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                harness.Factory.GetTransport(0).EmitClosed(4001, "expired token");
+                await WaitUntilAsync(
+                    () => harness.Controller.State == SessionState.AuthRequired,
+                    "Close 4001 did not enter AuthRequired.");
+                Assert.That(harness.Controller.Status.SanitizedError, Is.Not.Empty);
+
+                await harness.Controller.ConnectAsync();
+
+                Assert.That(harness.Controller.State, Is.EqualTo(SessionState.Ready));
+                Assert.That(harness.Controller.Status.SanitizedError, Is.Empty);
+                Assert.That(harness.Factory.Count, Is.EqualTo(2));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task FreshConnect_ClearsActivityFromTheRejectedSession()
+        {
+            var harness = SessionHarness.Create(new NoOpSystemErrorHandler());
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                var firstTransport = harness.Factory.GetTransport(0);
+                Assert.That(
+                    harness.Codec.TryParseEnvelope(
+                        firstTransport.SentMessages[0],
+                        out var firstEnvelope,
+                        out var firstEnvelopeError),
+                    Is.True,
+                    firstEnvelopeError.Message);
+                firstTransport.EmitMessage(SystemErrorJson(
+                    firstEnvelope.SessionId,
+                    ProtocolSystemErrorCodes.AuthFailed,
+                    "expired"));
+                await WaitUntilAsync(
+                    () => harness.Controller.State == SessionState.AuthRequired,
+                    "AUTH_FAILED did not enter AuthRequired.");
+                Assert.That(
+                    harness.Controller.Status.LastEventType,
+                    Is.EqualTo(ProtocolEventTypes.SystemError));
+
+                await harness.Controller.ConnectAsync();
+
+                Assert.That(harness.Controller.State, Is.EqualTo(SessionState.Ready));
+                Assert.That(harness.Controller.Status.LastEventType, Is.Empty);
+                Assert.That(harness.Controller.Status.LastInboundAtUtc, Is.Null);
+                Assert.That(
+                    harness.Controller.Status.LastOutboundEventType,
+                    Is.EqualTo(ProtocolEventTypes.Auth));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
+        [Test]
+        public async Task Diagnostics_NameLifecycleAndEventsWithoutLoggingCredentialsOrTranscript()
+        {
+            var diagnostics = new RecordingDiagnostics();
+            var harness = SessionHarness.CreateWithDiagnostics(diagnostics);
+            try
+            {
+                await harness.Controller.ConnectAsync();
+                await harness.Controller.SendFinalTranscriptAsync("PRIVATE TRANSCRIPT CONTENT");
+
+                Assert.That(
+                    diagnostics.Messages,
+                    Has.Some.Contains("State changed: Disconnected -> Connecting"));
+                Assert.That(
+                    diagnostics.Messages,
+                    Has.Some.Contains("Sent 'auth' as the first frame"));
+                Assert.That(
+                    diagnostics.Messages,
+                    Has.Some.Contains("Sent outbound 'stt.final'"));
+                Assert.That(
+                    diagnostics.Messages,
+                    Has.None.Contains(SessionHarness.AccessToken));
+                Assert.That(
+                    diagnostics.Messages,
+                    Has.None.Contains("PRIVATE TRANSCRIPT CONTENT"));
+            }
+            finally
+            {
+                await harness.StopAsync();
+            }
+        }
+
         private static void AssertAuthFrame(
             ProtocolCodec codec,
             string rawJson,
@@ -192,6 +487,13 @@ namespace SynthCohost.Tests.EditMode.Session
             Assert.That(codec.TryParsePayload<AuthPayload>(envelope, out var payload, out var payloadError), Is.True, payloadError.Message);
             Assert.That(payload.Token, Is.EqualTo(SessionHarness.AccessToken));
             Assert.That(payload.AvatarId, Is.EqualTo(AvatarId.ToString("D")));
+        }
+
+        private static string SystemErrorJson(string sessionId, string code, string message)
+        {
+            return "{\"v\":2,\"type\":\"system.error\",\"session_id\":\"" + sessionId +
+                   "\",\"ts\":\"2026-07-14T00:00:00Z\",\"payload\":{\"code\":\"" + code +
+                   "\",\"message\":\"" + message + "\"}}";
         }
 
         private static async Task AwaitWithTimeoutAsync(Task task, string failureMessage)
@@ -234,6 +536,20 @@ namespace SynthCohost.Tests.EditMode.Session
 
             public static SessionHarness Create(params IProtocolMessageHandler[] handlers)
             {
+                return CreateCore(new NullCohostDiagnostics(), handlers);
+            }
+
+            public static SessionHarness CreateWithDiagnostics(
+                ICohostDiagnostics diagnostics,
+                params IProtocolMessageHandler[] handlers)
+            {
+                return CreateCore(diagnostics, handlers);
+            }
+
+            private static SessionHarness CreateCore(
+                ICohostDiagnostics diagnostics,
+                IProtocolMessageHandler[] handlers)
+            {
                 var codec = new ProtocolCodec();
                 var dialect = new DeployedV2ProtocolDialect(codec);
                 var dispatcher = new ImmediateDispatcher();
@@ -245,13 +561,14 @@ namespace SynthCohost.Tests.EditMode.Session
                     TimeSpan.FromMinutes(10),
                     TimeSpan.FromHours(1),
                     new ReconnectPolicySnapshot(TimeSpan.Zero, TimeSpan.Zero, 0f, 3));
-                var router = new ProtocolMessageRouter(codec, dispatcher, handlers);
+                var router = new ProtocolMessageRouter(codec, dispatcher, handlers, diagnostics);
                 var controller = new CohostSessionController(
                     options,
                     new FixedCredentialProvider(),
                     dialect,
                     factory,
                     router,
+                    diagnostics: diagnostics,
                     dispatcher: dispatcher);
                 return new SessionHarness(codec, factory, controller);
             }
@@ -278,6 +595,42 @@ namespace SynthCohost.Tests.EditMode.Session
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return Task.FromResult(new CohostCredentials(SessionHarness.AccessToken, AvatarId));
+            }
+        }
+
+        private sealed class RecordingDiagnostics : ICohostDiagnostics
+        {
+            private readonly object gate = new object();
+            private readonly List<string> messages = new List<string>();
+
+            public event Action<CohostDiagnosticEvent> EventWritten;
+            public IReadOnlyList<string> Messages
+            {
+                get
+                {
+                    lock (gate)
+                    {
+                        return messages.ToArray();
+                    }
+                }
+            }
+
+            public void Write(
+                DiagnosticLogLevel level,
+                string category,
+                string message,
+                Exception exception = null)
+            {
+                lock (gate)
+                {
+                    messages.Add($"[{category}] {message}");
+                }
+                EventWritten?.Invoke(new CohostDiagnosticEvent(
+                    DateTimeOffset.UtcNow,
+                    level,
+                    category,
+                    message,
+                    exception?.GetType().Name));
             }
         }
 
@@ -413,6 +766,47 @@ namespace SynthCohost.Tests.EditMode.Session
             public void Dispose()
             {
                 State = TransportState.Disposed;
+            }
+        }
+
+        private sealed class NoOpSystemErrorHandler : IProtocolMessageHandler
+        {
+            public string EventType => ProtocolEventTypes.SystemError;
+
+            public Task HandleAsync(IncomingEnvelope envelope, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            }
+        }
+
+        private sealed class BlockingSystemErrorHandler : IProtocolMessageHandler
+        {
+            private readonly TaskCompletionSource<bool> started =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            private readonly TaskCompletionSource<bool> release =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            private readonly TaskCompletionSource<bool> finished =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public string EventType => ProtocolEventTypes.SystemError;
+            public Task Started => started.Task;
+            public Task Finished => finished.Task;
+
+            public async Task HandleAsync(
+                IncomingEnvelope envelope,
+                CancellationToken cancellationToken)
+            {
+                started.TrySetResult(true);
+                // Deliberately ignore cancellation to emulate a presentation adapter that completes
+                // after its connection has already been replaced.
+                await release.Task;
+                finished.TrySetResult(true);
+            }
+
+            public void Release()
+            {
+                release.TrySetResult(true);
             }
         }
 
