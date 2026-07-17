@@ -1,10 +1,10 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Unity implementation foundation, bridge audit, and live-test auth/UI hardening complete; authenticated v2 happy-path and broader backend release acceptance remain pending.**
+Status: **Unity deployed-v2 implementation, runtime live-test input workflow, bridge audit, and auth/UI hardening complete; a fresh-token Unity-panel happy path, Windows build, and broader backend release acceptance remain pending.**
 
 The live WebSocket and REST hosts are available. A temporary live test account and matching avatar UUID have now been created through the verified REST flow; a fresh short-lived access token must be minted immediately before each live run. The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
 
-Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The panel is width-constrained and responsive, while safe diagnostics show state transitions, inbound/outbound event names, UTC times, retry timing, and close-policy decisions without logging untrusted identifiers, close reasons, endpoint credentials, tokens, or transcript text. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 135/135 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
+Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The width-constrained panel now allows the endpoint, token, and avatar UUID to be reviewed or replaced at runtime before Connect; it can prefill them from process environment variables or an explicitly user-managed, Git-ignored `UserSettings` draft without serializing them into Unity assets. It also reports JWT expiry safely and applies endpoint overrides in memory without dirtying the settings asset. Safe diagnostics show state transitions, inbound/outbound event names, UTC times, retry timing, and close-policy decisions without logging untrusted identifiers, close reasons, endpoint credentials, tokens, or transcript text. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 157/157 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
 
 ## Source-of-truth order
 
@@ -24,8 +24,8 @@ This plan covers Unity-side work only. The ignored `synth-cohost-unity-bridge/` 
 
 Build a modular Unity client that:
 
-- Connects to a complete `ws://` or `wss://` URL configured in one Inspector field.
-- Switches between local and live endpoints by changing only that URL, assuming credentials are valid for the selected environment.
+- Uses a complete `ws://` or `wss://` Inspector URL as its default while allowing endpoint, token, and avatar UUID changes from the development Game-view panel before Connect.
+- Switches between local and live endpoints without code or asset mutation, assuming credentials are valid for the selected environment.
 - Uses `wss://synth-cohost-app.onrender.com/ws` for the current live integration target.
 - Has no dependency on a frontend/Vercel deployment; frontend preview and production domains are not WebSocket endpoints.
 - Implements the deployed integer `v: 2` envelope.
@@ -39,7 +39,7 @@ Build a modular Unity client that:
 - Never replays an interrupted turn after reconnect.
 - Keeps transport, protocol dialect, session lifecycle, routing, and Unity presentation independent and testable.
 - Can adopt proposed 2.1 later without rewriting avatar, UI, or STT feature code.
-- Never persists or logs access tokens.
+- Never writes or logs access tokens and never serializes them into Unity assets, source, or Git. An explicitly user-created, Git-ignored local development draft may contain a short-lived token in plaintext and remains the user's responsibility.
 
 ## 2. Scope
 
@@ -390,7 +390,20 @@ The audit found no approved or deployed Unity wire change:
 
 Because the current Unity implementation already conforms to every deployable item in this export, the required implementation action is to preserve the existing deployed-v2 dialect and update this plan. Adding speculative speech or OBS production code would create an unapproved contract rather than implement one.
 
-### 5.9 Final implementation decision
+### 5.9 Client live-placeholder handoff — 2026-07-17
+
+The client supplied the confirmed live WebSocket endpoint, a matching avatar UUID, and a 15-minute access token for Unity testing. The token expired at 2026-07-17 12:49:36 UTC (17:49:36 PKT), so it cannot prove the current authenticated happy path or avatar ownership now. An auth-only smoke with those exact local placeholders opened the WebSocket and received `system.error/AUTH_FAILED`; no close frame was observed during the 12-second post-error window, after which the probe aborted locally. No supplied credential is recorded in this plan or tracked Unity content.
+
+Implementation response:
+
+- Keep the three values editable in the development Game-view panel before Connect.
+- Prefill development values only from process environment variables or an explicitly user-created, Git-ignored `UserSettings/SynthCohostLiveTest.local.json` draft.
+- Treat the local draft as plaintext developer convenience, never production credential storage.
+- Inspect JWT `exp` locally for operator guidance only; this is not signature validation.
+- Reject expired tokens and tokens too near expiry for a possible Render cold start before opening the socket.
+- Obtain a fresh token immediately before the remaining Unity-panel happy-path run.
+
+### 5.10 Final implementation decision
 
 Implement one deployed-v2 dialect now. Do not build a hybrid or Inspector toggle between current v2 and proposed 2.1. Isolate protocol/session ownership and reconnect behavior behind interfaces, while keeping avatar, AI-response, STT, and UI code independent.
 
@@ -556,7 +569,7 @@ Transport implementation -------------------------------> Transport interfaces
 
 Protocol code must not reference `MonoBehaviour`, scenes, animators, UI, or the concrete WebSocket implementation.
 
-## 8. Inspector configuration
+## 8. Inspector and runtime configuration
 
 Create a `SynthCohostConnectionSettings` ScriptableObject referenced by the bootstrap component.
 
@@ -578,7 +591,13 @@ Requirements:
 - Pass the URL unchanged to the transport.
 - Permit `ws` only for local/loopback development.
 - Require `wss` for live/non-loopback endpoints and never bypass certificate validation.
-- Apply a changed URL on the next connect/reconnect.
+- Expose editable endpoint, masked-token, and avatar-UUID fields in the development Game-view panel before Connect.
+- Apply a changed runtime URL before a new Connect and leave the settings asset unchanged.
+- Allow runtime endpoint replacement only while `Disconnected`, `AuthRequired`, or `Faulted`; disconnect an active session first.
+- Prefill precedence is process environment, then the ignored local `UserSettings` draft, then the settings endpoint fallback.
+- Support `SYNTH_COHOST_ENDPOINT`, `SYNTH_COHOST_ACCESS_TOKEN`, and `SYNTH_COHOST_AVATAR_ID` process variables.
+- Treat the optional local draft as Git-ignored, development-only plaintext rather than production credential storage.
+- Use JWT `exp` inspection only as an advisory preflight, not signature validation; reject expired or cold-start-inadequate tokens locally.
 - Keep transport-connect, auth-send, and final-turn timeouts separate; a slow Render wake-up is not an auth or AI timeout.
 - Keep access tokens out of this asset, scenes, prefabs, source, and Git.
 - Supply token and avatar ID through runtime providers independent of the URL.
@@ -689,7 +708,7 @@ Also support `Stopping`, `Faulted`, and `AuthRequired`.
 - [x] Permit domain sends only in `Ready`.
 - [x] Clear heartbeat, current session, stale callbacks, and in-flight turn on disconnect.
 - [x] Publish typed state changes for diagnostics/UI.
-- [x] Never persist or log tokens.
+- [x] Runtime code never writes or logs tokens and never serializes them into tracked Unity content; the optional user-created, Git-ignored development draft is explicitly plaintext and local-only.
 
 Exit: fake transport tests prove every valid/invalid transition and silent-success handshake behavior.
 
@@ -766,6 +785,10 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 - [x] Support auto-connect and explicit Connect/Disconnect/Reconnect.
 - [x] Add a credential-safe live-test panel for runtime connect, transcript sends, avatar state, AI response, and system-error inspection.
 - [x] Constrain the panel, masked-token field, and action rows so long JWTs cannot expand the scroll content or displace/oversize buttons.
+- [x] Allow endpoint, token, and avatar UUID editing from the live-test Game-view panel before Connect.
+- [x] Support environment and ignored `UserSettings` placeholder prefills without serializing credentials into Unity assets.
+- [x] Recompose immutable connection options safely when a terminal-state runtime endpoint changes.
+- [x] Display JWT expiry and reject expired or nearly expired tokens before connection.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
 - [x] Add a developer status view for connection state/wake status, endpoint, session/turn state, last inbound/outbound events and UTC times, reconnect attempt, sanitized close result, and safe error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
@@ -776,8 +799,9 @@ Exit: a designer can configure and operate the socket without changing code.
 
 - [x] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
 - [x] Redact tokens and authorization material from every path.
+- [x] Keep runtime credentials out of tracked Unity content and document the optional ignored local draft as plaintext development data.
 - [x] Do not log full transcripts by default; allow sanitized/truncated development previews.
-- [x] Bound/allowlist backend error identifiers, omit unknown event identifiers and close reasons, hide auth-error text, and strip endpoint user-info/query/fragment from the panel.
+- [x] Bound/allowlist backend error identifiers, omit unknown event identifiers and close reasons, hide auth-error text, and reject endpoint user-info/query/fragment before transport use.
 - [x] Revalidate completed inbound handlers against the current connection generation while holding the lifecycle gate before applying terminal state/turn effects.
 - [ ] Add counters for connection duration/cold starts, auth sends/failures, reconnects, messages by type, malformed messages, turn timeouts, and close codes.
 - [x] Require `wss` and normal certificate validation for non-loopback/live endpoints.
@@ -788,14 +812,15 @@ Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
 
 ### Phase 10 — Live and optional local integration
 
-- [ ] Obtain valid non-committed credentials/avatar for the live backend.
-- [ ] Connect to `wss://synth-cohost-app.onrender.com/ws` through the Inspector setting.
+- [ ] Obtain a freshly minted non-committed access token immediately before Unity-panel testing; the matching avatar UUID is already available.
+- [ ] Connect to `wss://synth-cohost-app.onrender.com/ws` through the runtime Game-view endpoint field, which defaults from the settings asset.
+- [x] Confirm the latest supplied placeholder token has expired and cannot be used as evidence of a transport or backend failure.
 - [ ] After at least 15 minutes of backend inactivity, verify one real cold start can remain `Connecting`/`Waking server` for up to approximately 50 seconds without a false failure or duplicate attempt.
 - [ ] Verify auth is the first full v2 frame and includes the client session ID.
 - [ ] Verify no `session.ready`/heartbeat ack is required.
 - [ ] Remain connected for more than 60 seconds while 20-second heartbeats prevent close 4003.
 - [ ] Run a connected soak test beyond 15 minutes to confirm heartbeat traffic keeps the live service/session active.
-- [ ] Send one final transcript and verify the current live v2 path produces thinking, response behavior, and a valid non-empty AI response.
+- [ ] Repeat `stt.final -> avatar.state -> ai.response` through the Unity panel with a fresh token and verify a valid non-empty AI response.
 - [ ] Verify the final-turn gate rejects a second simultaneous turn.
 - [ ] Apply avatar behavior and verify state ack server-side.
 - [ ] Exercise partial transcript behavior if included in the milestone.
@@ -829,6 +854,10 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 - [x] Non-auth `system.error` releases the final-turn gate without disconnecting a healthy session.
 - [x] Diagnostic lifecycle/event logs exclude tokens and transcript contents.
 - [x] Responsive panel math keeps fields and button rows inside narrow Game views.
+- [x] Placeholder precedence, malformed-file handling, and safe notices.
+- [x] Git-ignored `UserSettings` path and absence of serialized credential fields.
+- [x] Runtime endpoint validation, settings non-mutation, and terminal-state change restrictions.
+- [x] JWT expiry parsing with a synthetic non-secret token.
 - [x] Heartbeat cadence and cancellation using a fake clock.
 - [ ] A simulated 50-second pending connect remains `Connecting`, does not time out at 10–15 seconds, and never creates a duplicate connection attempt.
 - [ ] Cancellation and the 75-second transport timeout terminate a delayed connection cleanly without stale callbacks.
@@ -848,7 +877,7 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### Build
 
-- [x] Run the EditMode suite in Unity `6000.3.10f1` (135/135 passing on 2026-07-17).
+- [x] Run the EditMode suite in Unity `6000.3.10f1` (157/157 passing on 2026-07-17).
 - [x] Add and run the PlayMode suite (live-scene smoke test 1/1 passing on 2026-07-17).
 - [ ] Produce and smoke-test a Windows Standalone development build.
 - [ ] Verify IL2CPP/AOT serialization if Android/iOS becomes in scope.
@@ -880,17 +909,17 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 - [x] Unknown types and malformed input cannot crash/deadlock Unity.
 - [x] Avatar, AI response, transcript transport, state ack, and errors use replaceable interfaces.
 - [x] Real microphone STT, TTS, audio, and visemes are absent from the current implementation.
-- [x] Tokens are neither persisted nor logged.
+- [x] Runtime code neither writes nor logs tokens and no credential is serialized into tracked Unity content; the optional local placeholder draft is explicitly Git-ignored plaintext development data.
 - [ ] EditMode, PlayMode, Windows build, and real-backend tests pass.
 - [ ] The exact live endpoint passes warm and cold-start-aware authenticated tests without reconnect storms.
-- [ ] Local/live socket switching requires only the Inspector endpoint URL change.
+- [ ] Local/live socket switching requires only changing the Inspector default or runtime Game-view endpoint field, without code changes.
 - [ ] Finalized backend communication-protocol regression and production-runtime acceptance pass.
 - [ ] The dashboard live-avatar delivery method and Unity build target are agreed before release packaging.
 - [x] The bridge folder remains ignored, clean, and unmodified.
 
 ## Final readiness answer
 
-The Unity current-v2 foundation and dedicated live-test scene are implemented. All 135 EditMode tests and the live-scene PlayMode smoke test pass in Unity. The latest bridge export through `79fbf85` has been compared with the Unity runtime and requires no production-code migration: every deployable v2 field/event is already covered, while OBS and speech/media additions are backend-side, mock, or explicitly unwired. The observed Unity failure was an expired JWT rather than a transport fault; the client now reports it immediately as `AuthRequired`, stops the rejected connection, and requires a newly pasted token. A subsequent fresh-token wire smoke with the same temporary account/avatar completed `stt.final -> avatar.state -> ai.response`, so the live backend and credentials are valid. The remaining live check is to repeat that happy path through the corrected Unity panel. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
+The Unity current-v2 foundation, dedicated live-test scene, and runtime input workflow are implemented. All 157 EditMode tests and the 1/1 live-scene PlayMode smoke test pass in Unity. The latest bridge export through `79fbf85` has been compared with the Unity runtime and requires no production-code migration: every deployable v2 field/event is already covered, while OBS and speech/media additions are backend-side, mock, or explicitly unwired. An earlier fresh-token wire smoke with the same temporary account/avatar completed `stt.final -> avatar.state -> ai.response`, so the deployed text path has been demonstrated outside the Unity panel. The latest client-supplied token has expired, however, so the corrected Unity panel still requires one fresh-token happy-path run. No credential is stored in tracked Unity content; the optional local placeholder draft remains Git-ignored plaintext development data. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on a Windows build plus the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
 
 The remaining inputs are for integration and release validation:
 

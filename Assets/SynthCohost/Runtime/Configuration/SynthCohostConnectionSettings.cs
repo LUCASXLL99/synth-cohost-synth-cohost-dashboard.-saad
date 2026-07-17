@@ -43,7 +43,12 @@ namespace SynthCohost.Runtime.Configuration
 
         public bool TryGetEndpoint(out Uri endpoint, out string error)
         {
-            if (!Uri.TryCreate(endpointUrl, UriKind.Absolute, out endpoint))
+            return TryParseEndpoint(endpointUrl, out endpoint, out error);
+        }
+
+        public static bool TryParseEndpoint(string value, out Uri endpoint, out string error)
+        {
+            if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out endpoint))
             {
                 error = "Endpoint URL must be an absolute ws:// or wss:// URL.";
                 return false;
@@ -54,6 +59,15 @@ namespace SynthCohost.Runtime.Configuration
             {
                 endpoint = null;
                 error = "Endpoint URL scheme must be ws or wss.";
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(endpoint.UserInfo) ||
+                !string.IsNullOrEmpty(endpoint.Query) ||
+                !string.IsNullOrEmpty(endpoint.Fragment))
+            {
+                endpoint = null;
+                error = "Endpoint URL must not contain user info, a query, or a fragment.";
                 return false;
             }
 
@@ -71,6 +85,27 @@ namespace SynthCohost.Runtime.Configuration
         public ConnectionRuntimeOptions CreateRuntimeOptions()
         {
             if (!TryGetEndpoint(out var endpoint, out var error))
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            return new ConnectionRuntimeOptions(
+                endpoint,
+                ConnectTimeout,
+                AuthSendTimeout,
+                FinalTurnResponseTimeout,
+                HeartbeatInterval,
+                Reconnect);
+        }
+
+        public ConnectionRuntimeOptions CreateRuntimeOptions(Uri endpointOverride)
+        {
+            if (endpointOverride == null)
+            {
+                return CreateRuntimeOptions();
+            }
+
+            if (!TryParseEndpoint(endpointOverride.AbsoluteUri, out var endpoint, out var error))
             {
                 throw new InvalidOperationException(error);
             }

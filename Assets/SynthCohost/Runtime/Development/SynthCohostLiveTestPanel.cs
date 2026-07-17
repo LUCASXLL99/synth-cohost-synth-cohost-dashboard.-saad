@@ -73,8 +73,10 @@ namespace SynthCohost.Runtime.Development
         [SerializeField, Min(420f)] private float panelWidth = 680f;
         [SerializeField] private string defaultTranscript = "Hello from the Unity live test.";
 
+        [NonSerialized] private string endpointUrl = string.Empty;
         [NonSerialized] private string accessToken = string.Empty;
         [NonSerialized] private string avatarId = string.Empty;
+        [NonSerialized] private string placeholderSourceSummary = "settings/manual";
         [NonSerialized] private string transcript = string.Empty;
         [NonSerialized] private string lastOperation = "Enter a temporary token and avatar UUID, then click Connect.";
         [NonSerialized] private string lastAvatarBehavior = "(none)";
@@ -101,9 +103,22 @@ namespace SynthCohost.Runtime.Development
                 ? "Hello from the Unity live test."
                 : defaultTranscript;
 
-            // Optional process-memory convenience. These environment variables are never saved.
-            accessToken = Environment.GetEnvironmentVariable("SYNTH_COHOST_ACCESS_TOKEN") ?? string.Empty;
-            avatarId = Environment.GetEnvironmentVariable("SYNTH_COHOST_AVATAR_ID") ?? string.Empty;
+            var placeholders = LiveTestPlaceholderSource.Load(
+                settings != null ? settings.EndpointUrl : string.Empty);
+            endpointUrl = placeholders.EndpointUrl;
+            accessToken = placeholders.AccessToken;
+            avatarId = placeholders.AvatarId;
+            placeholderSourceSummary = placeholders.SourceSummary;
+            if (!string.IsNullOrWhiteSpace(placeholders.SafeNotice))
+            {
+                lastOperation = placeholders.SafeNotice;
+            }
+            else if (!string.IsNullOrWhiteSpace(accessToken) ||
+                     !string.IsNullOrWhiteSpace(avatarId))
+            {
+                lastOperation =
+                    "Review the loaded runtime placeholders, replace any expired value, then click Connect.";
+            }
         }
 
         private void OnEnable()
@@ -166,7 +181,7 @@ namespace SynthCohost.Runtime.Development
 
             GUILayout.Label("Synth Cohost v2 Live Test", titleStyle);
             GUILayout.Label(
-                "Development panel only. The token is masked, kept in process memory, and is not serialized.",
+                "Development panel only. Inputs remain editable until Connect; credentials are never serialized into Unity assets.",
                 wrappedLabelStyle);
 
             DrawStatus();
@@ -184,11 +199,11 @@ namespace SynthCohost.Runtime.Development
         {
             GUILayout.Space(8f);
             GUILayout.Label("Connection", sectionStyle);
-            var endpointDisplay = settings != null && settings.TryGetEndpoint(out var endpoint, out _)
-                ? FormatEndpointForDisplay(endpoint)
-                : "(settings missing or endpoint invalid)";
+            var endpointDisplay = client != null && client.EffectiveEndpoint != null
+                ? FormatEndpointForDisplay(client.EffectiveEndpoint)
+                : "(client endpoint unavailable)";
             GUILayout.Label(
-                $"Endpoint: {endpointDisplay}",
+                $"Composed endpoint: {endpointDisplay}",
                 wrappedLabelStyle,
                 GUILayout.Width(controlWidth));
 
@@ -247,7 +262,24 @@ namespace SynthCohost.Runtime.Development
         private void DrawCredentials()
         {
             GUILayout.Space(8f);
-            GUILayout.Label("Runtime credentials", sectionStyle);
+            GUILayout.Label("Runtime connection inputs", sectionStyle);
+            GUILayout.Label("WebSocket endpoint (editable while disconnected)");
+            var previousEnabled = GUI.enabled;
+            var state = client != null ? client.State : SessionState.Disconnected;
+            GUI.enabled = previousEnabled && !IsBusy &&
+                          (state == SessionState.Disconnected ||
+                           state == SessionState.AuthRequired ||
+                           state == SessionState.Faulted);
+            endpointUrl = GUILayout.TextField(
+                endpointUrl ?? string.Empty,
+                GUILayout.Width(controlWidth));
+            GUI.enabled = previousEnabled;
+
+            GUI.enabled = previousEnabled && !IsBusy &&
+                          (state == SessionState.Disconnected ||
+                           state == SessionState.AuthRequired ||
+                           state == SessionState.Faulted ||
+                           state == SessionState.Ready);
             GUILayout.Label("Access token (masked)");
             accessToken = GUILayout.PasswordField(
                 accessToken ?? string.Empty,
@@ -255,6 +287,15 @@ namespace SynthCohost.Runtime.Development
                 GUILayout.Width(controlWidth));
             GUILayout.Label("Avatar UUID");
             avatarId = GUILayout.TextField(avatarId ?? string.Empty, GUILayout.Width(controlWidth));
+            GUI.enabled = previousEnabled;
+            GUILayout.Label(
+                $"Placeholder source: {placeholderSourceSummary}",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
+            GUILayout.Label(
+                $"Token status: {FormatTokenStatus(accessToken)}",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
         }
 
         private void DrawConnectionControls()
@@ -341,7 +382,11 @@ namespace SynthCohost.Runtime.Development
 
         private async void Connect()
         {
-            if (!TryValidateCredentials(out var parsedAvatarId, out var validationError))
+            if (!TryValidateConnectionInputs(
+                    out var parsedEndpoint,
+                    out var parsedAccessToken,
+                    out var parsedAvatarId,
+                    out var validationError))
             {
                 lastOperation = validationError;
                 return;
@@ -355,8 +400,13 @@ namespace SynthCohost.Runtime.Development
 
             try
             {
-                var token = accessToken;
-                client.SetRuntimeCredentials(token, parsedAvatarId);
+                if (!client.TrySetRuntimeEndpoint(parsedEndpoint.AbsoluteUri, out var endpointError))
+                {
+                    lastOperation = endpointError;
+                    return;
+                }
+
+                client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
                 accessToken = string.Empty;
                 lastSystemError = "(none)";
                 await client.ConnectAsync(operation.Token);
@@ -394,13 +444,17 @@ namespace SynthCohost.Runtime.Development
 
             if (!string.IsNullOrWhiteSpace(accessToken))
             {
-                if (!TryValidateCredentials(out var parsedAvatarId, out var validationError))
+                if (!TryValidateConnectionInputs(
+                        out _,
+                        out var parsedAccessToken,
+                        out var parsedAvatarId,
+                        out var validationError))
                 {
                     lastOperation = validationError;
                     return;
                 }
 
-                client.SetRuntimeCredentials(accessToken, parsedAvatarId);
+                client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
                 accessToken = string.Empty;
                 lastSystemError = "(none)";
             }
@@ -488,8 +542,14 @@ namespace SynthCohost.Runtime.Development
             }
         }
 
-        private bool TryValidateCredentials(out Guid parsedAvatarId, out string error)
+        private bool TryValidateConnectionInputs(
+            out Uri parsedEndpoint,
+            out string parsedAccessToken,
+            out Guid parsedAvatarId,
+            out string error)
         {
+            parsedEndpoint = null;
+            parsedAccessToken = string.Empty;
             parsedAvatarId = Guid.Empty;
             if (client == null)
             {
@@ -503,15 +563,39 @@ namespace SynthCohost.Runtime.Development
                 return false;
             }
 
-            if (!settings.TryGetEndpoint(out _, out error))
+            if (!SynthCohostConnectionSettings.TryParseEndpoint(
+                    endpointUrl,
+                    out parsedEndpoint,
+                    out error))
             {
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(accessToken))
+            parsedAccessToken = accessToken?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(parsedAccessToken))
             {
                 error = "Paste a valid access token.";
                 return false;
+            }
+
+            if (JwtAccessTokenInspector.TryGetExpirationUtc(
+                    parsedAccessToken,
+                    out var expirationUtc))
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (expirationUtc <= now)
+                {
+                    error =
+                        $"Access token expired at {expirationUtc:HH:mm:ss} UTC. Paste a fresh token.";
+                    return false;
+                }
+
+                if (expirationUtc - now < settings.ConnectTimeout + TimeSpan.FromSeconds(10))
+                {
+                    error =
+                        "Access token expires too soon for a possible backend cold start. Paste a fresh token.";
+                    return false;
+                }
             }
 
             if (!Guid.TryParse(avatarId?.Trim(), out parsedAvatarId) || parsedAvatarId == Guid.Empty)
@@ -595,6 +679,28 @@ namespace SynthCohost.Runtime.Development
             return timestampUtc.HasValue
                 ? $"{eventType} at {timestampUtc.Value:HH:mm:ss} UTC"
                 : eventType;
+        }
+
+        internal static string FormatTokenStatus(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return "not entered";
+            }
+
+            if (!JwtAccessTokenInspector.TryGetExpirationUtc(token, out var expirationUtc))
+            {
+                return "present; expiry is unavailable";
+            }
+
+            var remaining = expirationUtc - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return $"expired at {expirationUtc:HH:mm:ss} UTC - paste a fresh token";
+            }
+
+            return $"expires at {expirationUtc:HH:mm:ss} UTC " +
+                   $"(about {Math.Max(1, Math.Ceiling(remaining.TotalMinutes)):0} min remaining)";
         }
 
         internal static string FormatEndpointForDisplay(Uri endpoint)

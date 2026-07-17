@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using SynthCohost.Runtime.Bootstrap;
@@ -73,8 +74,27 @@ namespace SynthCohost.Tests.EditMode.Development
             var panel = prefab.GetComponent<SynthCohostLiveTestPanel>();
             var serialized = new SerializedObject(panel);
 
+            Assert.That(serialized.FindProperty("endpointUrl"), Is.Null);
             Assert.That(serialized.FindProperty("accessToken"), Is.Null);
             Assert.That(serialized.FindProperty("avatarId"), Is.Null);
+
+            var serializedNames = new List<string>();
+            var iterator = serialized.GetIterator();
+            var enterChildren = true;
+            while (iterator.NextVisible(enterChildren))
+            {
+                enterChildren = false;
+                serializedNames.Add(iterator.propertyPath);
+            }
+
+            Assert.That(
+                serializedNames.Any(name =>
+                    name.IndexOf("token", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("secret", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("credential", StringComparison.OrdinalIgnoreCase) >= 0),
+                Is.False,
+                "The live-test prefab must never serialize credential-like fields.");
         }
 
         [Test]

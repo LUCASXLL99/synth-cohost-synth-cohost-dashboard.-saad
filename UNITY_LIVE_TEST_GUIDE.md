@@ -8,6 +8,7 @@
 - Live WebSocket default: `wss://synth-cohost-app.onrender.com/ws`
 - Auto Connect is disabled so credentials can be entered safely after Play Mode starts.
 - Access tokens and avatar IDs are not serialized into the scene, prefab, settings, or source.
+- Endpoint, access token, and avatar UUID are editable in the Game-view test panel before **Connect**.
 
 `SampleScene` remains the clean starter scene. Use the dedicated live-test scene for backend testing.
 
@@ -27,26 +28,51 @@ Do not use the development token or placeholder avatar from `test_ws.sh` against
 1. Let Unity finish compiling. Confirm there are no Console errors.
 2. In the Project window, open `Assets/Scenes/SynthCohostLiveTest.unity`.
 3. Press Play and select the Game view.
-4. Paste the temporary access token into **Access token**. It is masked and clears from the panel after it is transferred to the runtime-only credential provider.
-5. Paste the matching avatar UUID into **Avatar UUID**.
-6. Click **Connect** once.
-7. Watch **State**. A sleeping Render service can remain `Connecting (Waking server...)` for about 50 seconds. Do not click Connect again.
-8. Continue only when the state becomes `Ready`. In deployed v2 this initially means the socket opened and the auth frame was sent; there is no positive `session.ready` response. The panel changes to **backend activity received** after the first valid inbound event.
-9. Enter text under **Transcript**, then click **Send Final**.
-10. Expect a simulated avatar state such as `thinking`, followed by an AI response containing text, emotion, and intent. Any `system.error` is displayed in the panel.
-11. Leave the connection open for more than 60 seconds to confirm 20-second heartbeats keep it alive.
-12. Click **Disconnect**, then exit Play Mode.
+4. Review or change **WebSocket endpoint** while the client is disconnected.
+5. Paste the temporary access token into **Access token**. It is masked, shows a safe expiry status, and clears after transfer to the runtime-only credential provider.
+6. Paste the matching avatar UUID into **Avatar UUID**.
+7. Click **Connect** once.
+8. Watch **State**. A sleeping Render service can remain `Connecting (Waking server...)` for about 50 seconds. Do not click Connect again.
+9. Continue only when the state becomes `Ready`. In deployed v2 this initially means the socket opened and the auth frame was sent; there is no positive `session.ready` response. The panel changes to **backend activity received** after the first valid inbound event.
+10. Enter text under **Transcript**, then click **Send Final**.
+11. Expect a simulated avatar state such as `thinking`, followed by an AI response containing text, emotion, and intent. Any `system.error` is displayed in the panel.
+12. Leave the connection open for more than 60 seconds to confirm 20-second heartbeats keep it alive.
+13. Click **Disconnect**, then exit Play Mode.
 
 The avatar adapter in this test scene records behavior and sends `state.ack`; it does not animate a final avatar model.
 
 ## Change live/local endpoint
 
-1. Exit Play Mode.
-2. Select `Assets/SynthCohost/Configuration/SynthCohostLiveConnectionSettings.asset`.
-3. Change only **Endpoint URL**:
+For a one-run change, edit **WebSocket endpoint** directly in the Game-view panel while disconnected, then click **Connect**. This override remains in memory and does not dirty the settings asset.
+
+Use a plain `ws://` or `wss://` endpoint with no embedded user info, query string, or fragment. Non-loopback targets require `wss://`.
+
+For a persistent non-secret default, exit Play Mode, select `Assets/SynthCohost/Configuration/SynthCohostLiveConnectionSettings.asset`, and change **Endpoint URL**:
+
    - Live: `wss://synth-cohost-app.onrender.com/ws`
    - Local: `ws://127.0.0.1:8080/ws`
-4. Enter Play Mode again and use credentials valid for that environment.
+
+Then enter Play Mode again and use credentials valid for that environment.
+
+## Optional local placeholders
+
+The panel can prefill values from process environment variables or from the local file `UserSettings/SynthCohostLiveTest.local.json`. Environment variables take precedence:
+
+- `SYNTH_COHOST_ENDPOINT`
+- `SYNTH_COHOST_ACCESS_TOKEN`
+- `SYNTH_COHOST_AVATAR_ID`
+
+Local-file shape:
+
+```json
+{
+  "endpointUrl": "wss://synth-cohost-app.onrender.com/ws",
+  "accessToken": "paste-a-fresh-short-lived-token",
+  "avatarId": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+`UserSettings/` is Git-ignored. The local file is still plaintext on this computer, so use it only for development, replace expired tokens promptly, and delete it when no longer needed.
 
 Never put a token into the settings asset, a scene, a prefab, source code, `PlayerPrefs`, or Git.
 

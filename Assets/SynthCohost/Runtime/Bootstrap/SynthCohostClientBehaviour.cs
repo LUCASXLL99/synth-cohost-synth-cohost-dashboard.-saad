@@ -32,11 +32,27 @@ namespace SynthCohost.Runtime.Bootstrap
         [NonSerialized] private CredentialProviderSlot credentialSlot;
         [NonSerialized] private CohostSessionController session;
         [NonSerialized] private ICohostDiagnostics diagnostics;
+        [NonSerialized] private Uri runtimeEndpointOverride;
         [NonSerialized] private bool shuttingDown;
 
         public SessionState State => session?.State ?? SessionState.Disconnected;
         public ConnectionStatusViewModel Status => session?.Status;
         public ICohostOutboundSession Outbound => session;
+
+        public Uri EffectiveEndpoint
+        {
+            get
+            {
+                if (runtimeEndpointOverride != null)
+                {
+                    return runtimeEndpointOverride;
+                }
+
+                return settings != null && settings.TryGetEndpoint(out var endpoint, out _)
+                    ? endpoint
+                    : null;
+            }
+        }
 
         /// <summary>
         /// Supplies a runtime-only provider. Call before enabling auto-connect when credentials come
@@ -55,6 +71,58 @@ namespace SynthCohost.Runtime.Bootstrap
             runtimeCredentials.SetCredentials(accessToken, avatarId);
             credentialProvider = runtimeCredentials;
             credentialSlot?.Set(runtimeCredentials);
+        }
+
+        /// <summary>
+        /// Applies an in-memory endpoint override without modifying the settings asset. Because
+        /// session options are immutable, a changed endpoint recomposes the client and is allowed
+        /// only while no connection lifecycle is active.
+        /// </summary>
+        public bool TrySetRuntimeEndpoint(string endpointUrl, out string error)
+        {
+            if (!SynthCohostConnectionSettings.TryParseEndpoint(
+                    endpointUrl,
+                    out var endpoint,
+                    out error))
+            {
+                return false;
+            }
+
+            var current = EffectiveEndpoint;
+            if (current != null && Uri.Compare(
+                    current,
+                    endpoint,
+                    UriComponents.AbsoluteUri,
+                    UriFormat.SafeUnescaped,
+                    StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            if (session != null && !CanChangeRuntimeEndpoint(session.State))
+            {
+                error = "Disconnect before changing the WebSocket endpoint.";
+                return false;
+            }
+
+            runtimeEndpointOverride = endpoint;
+            if (session != null)
+            {
+                session.Dispose();
+                session = null;
+                Compose();
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        internal static bool CanChangeRuntimeEndpoint(SessionState state)
+        {
+            return state == SessionState.Disconnected ||
+                   state == SessionState.AuthRequired ||
+                   state == SessionState.Faulted;
         }
 
         public Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -145,7 +213,7 @@ namespace SynthCohost.Runtime.Bootstrap
 
         private void Compose()
         {
-            var options = settings.CreateRuntimeOptions();
+            var options = settings.CreateRuntimeOptions(runtimeEndpointOverride);
             diagnostics = new CohostDiagnostics(settings.DiagnosticLogLevel);
             var dispatcher = new MainThreadDispatcher(SynchronizationContext.Current);
             var codec = new ProtocolCodec();
