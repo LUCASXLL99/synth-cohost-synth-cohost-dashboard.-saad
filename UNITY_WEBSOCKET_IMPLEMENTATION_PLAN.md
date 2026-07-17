@@ -4,7 +4,7 @@ Status: **Unity deployed-v2 implementation, runtime live-test input workflow, br
 
 The live WebSocket and REST hosts are available. A temporary live test account and matching avatar UUID have now been created through the verified REST flow; a fresh short-lived access token must be minted immediately before each live run. The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
 
-Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The width-constrained panel now allows the endpoint, token, and avatar UUID to be reviewed or replaced at runtime before Connect; it can prefill them from process environment variables or an explicitly user-managed, Git-ignored `UserSettings` draft without serializing them into Unity assets. It also reports JWT expiry safely and applies endpoint overrides in memory without dirtying the settings asset. Safe diagnostics show state transitions, inbound/outbound event names, UTC times, retry timing, and close-policy decisions without logging untrusted identifiers, close reasons, endpoint credentials, tokens, or transcript text. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 157/157 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
+Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The width-constrained panel allows the endpoint, token, and avatar UUID to be reviewed or replaced at runtime before Connect; it can prefill them from process environment variables or an explicitly user-managed, Git-ignored `UserSettings` draft without serializing them into Unity assets. It reports JWT expiry safely and applies endpoint overrides in memory without dirtying the settings asset. Every panel operation and pre-network rejection now writes a bounded on-screen activity entry and a Unity Console breadcrumb; cold-start waits add 5/30/60-second progress notices. Safe diagnostics show initialization, state transitions, endpoint authority, event names/codes, UTC times, retry timing, close-policy decisions, and exception types without logging untrusted identifiers, close reasons, endpoint credentials, tokens, avatar UUIDs, session IDs, transcript/AI text, backend raw messages, or exception messages. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 169/169 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
 
 ## Source-of-truth order
 
@@ -789,6 +789,8 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 - [x] Support environment and ignored `UserSettings` placeholder prefills without serializing credentials into Unity assets.
 - [x] Recompose immutable connection options safely when a terminal-state runtime endpoint changes.
 - [x] Display JWT expiry and reject expired or nearly expired tokens before connection.
+- [x] Add a bounded in-panel activity log mirrored to the Unity Console for initialization, validation, connect/reconnect/disconnect, sends, backend event categories, and failures.
+- [x] Add 5/30/60-second progress breadcrumbs while a live connect/reconnect may be waiting on a Render cold start.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
 - [x] Add a developer status view for connection state/wake status, endpoint, session/turn state, last inbound/outbound events and UTC times, reconnect attempt, sanitized close result, and safe error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
@@ -800,6 +802,8 @@ Exit: a designer can configure and operate the socket without changing code.
 - [x] Add structured categories for transport, protocol, session, heartbeat, reconnect, turns, and features.
 - [x] Redact tokens and authorization material from every path.
 - [x] Keep runtime credentials out of tracked Unity content and document the optional ignored local draft as plaintext development data.
+- [x] Log panel validation blockers that occur before the reusable transport/session diagnostics are reached.
+- [x] Restrict development logs to fixed text, enums, state, endpoint authority, normalized codes, timeouts, and exception types; never log raw credentials, identifiers, content, backend messages, or exception messages.
 - [x] Do not log full transcripts by default; allow sanitized/truncated development previews.
 - [x] Bound/allowlist backend error identifiers, omit unknown event identifiers and close reasons, hide auth-error text, and reject endpoint user-info/query/fragment before transport use.
 - [x] Revalidate completed inbound handlers against the current connection generation while holding the lifecycle gate before applying terminal state/turn effects.
@@ -858,6 +862,8 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 - [x] Git-ignored `UserSettings` path and absence of serialized credential fields.
 - [x] Runtime endpoint validation, settings non-mutation, and terminal-state change restrictions.
 - [x] JWT expiry parsing with a synthetic non-secret token.
+- [x] Exact safe pre-network validation logging for missing/invalid/expired connection inputs.
+- [x] Host-only connect logging, normalized system-error logging, exception-type-only logging, content redaction, and bounded activity history.
 - [x] Heartbeat cadence and cancellation using a fake clock.
 - [ ] A simulated 50-second pending connect remains `Connecting`, does not time out at 10–15 seconds, and never creates a duplicate connection attempt.
 - [ ] Cancellation and the 75-second transport timeout terminate a delayed connection cleanly without stale callbacks.
@@ -877,7 +883,7 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### Build
 
-- [x] Run the EditMode suite in Unity `6000.3.10f1` (157/157 passing on 2026-07-17).
+- [x] Run the EditMode suite in Unity `6000.3.10f1` (169/169 passing on 2026-07-17).
 - [x] Add and run the PlayMode suite (live-scene smoke test 1/1 passing on 2026-07-17).
 - [ ] Produce and smoke-test a Windows Standalone development build.
 - [ ] Verify IL2CPP/AOT serialization if Android/iOS becomes in scope.
@@ -919,7 +925,7 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 
 ## Final readiness answer
 
-The Unity current-v2 foundation, dedicated live-test scene, and runtime input workflow are implemented. All 157 EditMode tests and the 1/1 live-scene PlayMode smoke test pass in Unity. The latest bridge export through `79fbf85` has been compared with the Unity runtime and requires no production-code migration: every deployable v2 field/event is already covered, while OBS and speech/media additions are backend-side, mock, or explicitly unwired. An earlier fresh-token wire smoke with the same temporary account/avatar completed `stt.final -> avatar.state -> ai.response`, so the deployed text path has been demonstrated outside the Unity panel. The latest client-supplied token has expired, however, so the corrected Unity panel still requires one fresh-token happy-path run. No credential is stored in tracked Unity content; the optional local placeholder draft remains Git-ignored plaintext development data. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on a Windows build plus the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
+The Unity current-v2 foundation, dedicated live-test scene, runtime input workflow, and safe dual-surface diagnostics are implemented. All 169 EditMode tests and the 1/1 live-scene PlayMode smoke test pass in Unity. The latest bridge export through `79fbf85` has been compared with the Unity runtime and requires no production-code migration: every deployable v2 field/event is already covered, while OBS and speech/media additions are backend-side, mock, or explicitly unwired. An earlier fresh-token wire smoke with the same temporary account/avatar completed `stt.final -> avatar.state -> ai.response`, so the deployed text path has been demonstrated outside the Unity panel. The latest client-supplied token has expired, however, so the corrected Unity panel still requires one fresh-token happy-path run. That preflight rejection is now explicit in both the panel activity log and Unity Console. No credential is stored in tracked Unity content; the optional local placeholder draft remains Git-ignored plaintext development data. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on a Windows build plus the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
 
 The remaining inputs are for integration and release validation:
 

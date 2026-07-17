@@ -72,7 +72,7 @@ namespace SynthCohost.Editor
             serialized.FindProperty("finalTurnResponseTimeoutSeconds").floatValue = 120f;
             serialized.FindProperty("heartbeatIntervalSeconds").floatValue = 20f;
             serialized.FindProperty("diagnosticLogLevel").enumValueIndex =
-                (int)DiagnosticLogLevel.Information;
+                (int)DiagnosticLogLevel.Verbose;
 
             var reconnect = serialized.FindProperty("reconnect");
             reconnect.FindPropertyRelative("baseDelaySeconds").floatValue = 1f;

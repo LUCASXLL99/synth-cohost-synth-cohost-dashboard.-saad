@@ -41,6 +41,24 @@ Do not use the development token or placeholder avatar from `test_ws.sh` against
 
 The avatar adapter in this test scene records behavior and sends `state.ack`; it does not animate a final avatar model.
 
+## Connection and failure logs
+
+The same safe activity is now shown in two places:
+
+- **Activity log (also written to Console)** at the bottom of the Game-view panel.
+- **Window > General > Console**, using the `[SynthCohost/LiveTest]`, `[SynthCohost/Bootstrap]`, `[SynthCohost/Transport]`, and `[SynthCohost/Session]` prefixes.
+
+Enable the **Log**, **Warning**, and **Error** buttons in the Console toolbar. The expected startup sequence includes `Panel initialized`, `Client composed`, and `Auto-connect is disabled`. After clicking **Connect**, expect either:
+
+- A clear red preflight error explaining which input blocked the socket; or
+- `Connect requested`, `Opening WebSocket`, `Runtime endpoint accepted`, `Runtime credentials staged`, transport/socket progress, auth sent, and provisional `Ready`.
+
+During a cold start, additional entries appear after 5, 30, and 60 seconds. If the state becomes `Reconnecting`, automatic retry is active and **Disconnect** cancels it.
+
+The previously supplied 15-minute placeholder token is expired. With that token, **Connect is intentionally blocked before opening a socket** and both log views report that a fresh token is required.
+
+Logs never include the token, avatar UUID, transcript or AI text, session ID, raw backend message, or exception message.
+
 ## Change live/local endpoint
 
 For a one-run change, edit **WebSocket endpoint** directly in the Game-view panel while disconnected, then click **Connect**. This override remains in memory and does not dirty the settings asset.

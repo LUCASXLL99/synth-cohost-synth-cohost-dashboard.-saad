@@ -62,6 +62,10 @@ namespace SynthCohost.Runtime.Bootstrap
         {
             credentialProvider = provider ?? throw new ArgumentNullException(nameof(provider));
             credentialSlot?.Set(credentialProvider);
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                "A runtime credential provider was assigned; credential values were not logged.");
         }
 
         /// <summary>Convenience API for credentials already obtained at runtime. Never call with checked-in constants.</summary>
@@ -71,6 +75,10 @@ namespace SynthCohost.Runtime.Bootstrap
             runtimeCredentials.SetCredentials(accessToken, avatarId);
             credentialProvider = runtimeCredentials;
             credentialSlot?.Set(runtimeCredentials);
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                "Runtime credentials were updated; token and avatar values were not logged.");
         }
 
         /// <summary>
@@ -85,6 +93,10 @@ namespace SynthCohost.Runtime.Bootstrap
                     out var endpoint,
                     out error))
             {
+                diagnostics?.Write(
+                    DiagnosticLogLevel.Warning,
+                    "Bootstrap",
+                    "A runtime endpoint override was rejected before transport use.");
                 return false;
             }
 
@@ -96,6 +108,10 @@ namespace SynthCohost.Runtime.Bootstrap
                     UriFormat.SafeUnescaped,
                     StringComparison.OrdinalIgnoreCase) == 0)
             {
+                diagnostics?.Write(
+                    DiagnosticLogLevel.Verbose,
+                    "Bootstrap",
+                    "The requested runtime endpoint already matches the composed endpoint.");
                 error = string.Empty;
                 return true;
             }
@@ -103,9 +119,17 @@ namespace SynthCohost.Runtime.Bootstrap
             if (session != null && !CanChangeRuntimeEndpoint(session.State))
             {
                 error = "Disconnect before changing the WebSocket endpoint.";
+                diagnostics?.Write(
+                    DiagnosticLogLevel.Warning,
+                    "Bootstrap",
+                    "A runtime endpoint change was rejected because a connection lifecycle is active.");
                 return false;
             }
 
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                "Applying an in-memory endpoint override and recomposing the client.");
             runtimeEndpointOverride = endpoint;
             if (session != null)
             {
@@ -128,17 +152,29 @@ namespace SynthCohost.Runtime.Bootstrap
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
             EnsureComposed();
+            diagnostics.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                $"Explicit Connect requested in state {session.State}.");
             return session.ConnectAsync(cancellationToken);
         }
 
         public Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                $"Explicit Disconnect requested in state {State}.");
             return session == null ? Task.CompletedTask : session.DisconnectAsync(cancellationToken);
         }
 
         public async Task ReconnectAsync(CancellationToken cancellationToken = default)
         {
             EnsureComposed();
+            diagnostics.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                $"Explicit Reconnect requested in state {session.State}.");
             await session.DisconnectAsync(cancellationToken);
             await session.ConnectAsync(cancellationToken);
         }
@@ -180,6 +216,10 @@ namespace SynthCohost.Runtime.Bootstrap
         {
             if (!settings.AutoConnect)
             {
+                diagnostics.Write(
+                    DiagnosticLogLevel.Information,
+                    "Bootstrap",
+                    "Auto-connect is disabled; waiting for an explicit Connect request.");
                 return;
             }
 
@@ -248,6 +288,20 @@ namespace SynthCohost.Runtime.Bootstrap
                 diagnostics,
                 dispatcher);
             deferredOutbound.Bind(session);
+            diagnostics.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                $"Client composed for {FormatEndpointAuthority(options.Endpoint)}; " +
+                $"diagnostics={settings.DiagnosticLogLevel}; connect timeout={options.ConnectTimeout.TotalSeconds:0}s.");
+        }
+
+        private static string FormatEndpointAuthority(Uri endpoint)
+        {
+            var host = endpoint.HostNameType == UriHostNameType.IPv6
+                ? $"[{endpoint.Host}]"
+                : endpoint.IdnHost;
+            var port = endpoint.IsDefaultPort ? string.Empty : $":{endpoint.Port}";
+            return $"{endpoint.Scheme}://{host}{port}";
         }
 
         private void EnsureComposed()

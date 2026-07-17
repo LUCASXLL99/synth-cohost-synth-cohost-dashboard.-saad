@@ -55,7 +55,7 @@ namespace SynthCohost.Runtime.Development
 
     /// <summary>
     /// Development harness for exercising the deployed v2 text flow from the dedicated live-test scene. Credentials
-    /// are private, non-serialized runtime values and are never written to the scene or settings.
+    /// remain private, non-serialized runtime values; the component never writes them to Unity assets or source.
     /// Remove this component from production scenes.
     /// </summary>
     [DisallowMultipleComponent]
@@ -84,6 +84,10 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private string lastSystemError = "(none)";
         [NonSerialized] private Vector2 scrollPosition;
         [NonSerialized] private CancellationTokenSource activeOperation;
+        [NonSerialized] private LiveTestOperationKind? activeOperationKind;
+        [NonSerialized] private double activeOperationStartedRealtime;
+        [NonSerialized] private int activeProgressNotice;
+        [NonSerialized] private LiveTestConnectionDiagnostics connectionDiagnostics;
         [NonSerialized] private GUIStyle titleStyle;
         [NonSerialized] private GUIStyle sectionStyle;
         [NonSerialized] private GUIStyle wrappedLabelStyle;
@@ -118,6 +122,20 @@ namespace SynthCohost.Runtime.Development
             {
                 lastOperation =
                     "Review the loaded runtime placeholders, replace any expired value, then click Connect.";
+            }
+
+            connectionDiagnostics = new LiveTestConnectionDiagnostics(this);
+            connectionDiagnostics.PanelInitialized(
+                client != null &&
+                settings != null &&
+                avatarAdapter != null &&
+                aiResponseAdapter != null &&
+                systemErrorAdapter != null,
+                !string.IsNullOrWhiteSpace(accessToken),
+                !string.IsNullOrWhiteSpace(avatarId));
+            if (!string.IsNullOrWhiteSpace(placeholders.SafeNotice))
+            {
+                connectionDiagnostics.PlaceholderLoadWarning();
             }
         }
 
@@ -159,6 +177,38 @@ namespace SynthCohost.Runtime.Development
             activeOperation?.Cancel();
             activeOperation?.Dispose();
             activeOperation = null;
+            activeOperationKind = null;
+            activeProgressNotice = 0;
+        }
+
+        private void Update()
+        {
+            if (activeOperation == null ||
+                !activeOperationKind.HasValue ||
+                (activeOperationKind.Value != LiveTestOperationKind.Connect &&
+                 activeOperationKind.Value != LiveTestOperationKind.Reconnect))
+            {
+                return;
+            }
+
+            var elapsedSeconds = Time.realtimeSinceStartupAsDouble - activeOperationStartedRealtime;
+            var threshold = activeProgressNotice == 0
+                ? 5
+                : activeProgressNotice == 1
+                    ? 30
+                    : activeProgressNotice == 2
+                        ? 60
+                        : int.MaxValue;
+            if (elapsedSeconds < threshold)
+            {
+                return;
+            }
+
+            activeProgressNotice++;
+            connectionDiagnostics?.StillWaiting(
+                activeOperationKind.Value,
+                threshold,
+                settings != null ? settings.ConnectTimeout : TimeSpan.FromSeconds(75));
         }
 
         private void OnGUI()
@@ -189,6 +239,7 @@ namespace SynthCohost.Runtime.Development
             DrawConnectionControls();
             DrawTranscriptControls();
             DrawResults();
+            DrawActivityLog();
 
             GUILayout.EndVertical();
             GUILayout.EndScrollView();
@@ -380,19 +431,46 @@ namespace SynthCohost.Runtime.Development
             GUILayout.Label($"System error: {lastSystemError}", wrappedLabelStyle, GUILayout.Width(controlWidth));
         }
 
+        private void DrawActivityLog()
+        {
+            GUILayout.Space(8f);
+            GUILayout.Label("Activity log (also written to Console)", sectionStyle);
+            var entries = connectionDiagnostics?.Snapshot();
+            if (entries == null || entries.Count == 0)
+            {
+                GUILayout.Label("(none)", wrappedLabelStyle, GUILayout.Width(controlWidth));
+                return;
+            }
+
+            foreach (var entry in entries)
+            {
+                GUILayout.Label(
+                    entry.ToDisplayLine(),
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+            }
+        }
+
         private async void Connect()
         {
+            connectionDiagnostics?.OperationRequested(
+                LiveTestOperationKind.Connect,
+                client != null ? client.State : SessionState.Disconnected);
             if (!TryValidateConnectionInputs(
                     out var parsedEndpoint,
                     out var parsedAccessToken,
                     out var parsedAvatarId,
+                    out var validationFailure,
                     out var validationError))
             {
                 lastOperation = validationError;
+                connectionDiagnostics?.InputRejected(validationFailure);
                 return;
             }
 
-            var operation = BeginOperation("Connecting. Keep Play Mode running during a possible cold start...");
+            var operation = BeginOperation(
+                LiveTestOperationKind.Connect,
+                "Connecting. Keep Play Mode running during a possible cold start...");
             if (operation == null)
             {
                 return;
@@ -400,27 +478,34 @@ namespace SynthCohost.Runtime.Development
 
             try
             {
+                connectionDiagnostics?.ConnectStarting(parsedEndpoint, settings.ConnectTimeout);
                 if (!client.TrySetRuntimeEndpoint(parsedEndpoint.AbsoluteUri, out var endpointError))
                 {
                     lastOperation = endpointError;
+                    connectionDiagnostics?.EndpointOverrideRejected();
                     return;
                 }
 
+                connectionDiagnostics?.RuntimeEndpointApplied();
                 client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                connectionDiagnostics?.CredentialsStaged();
                 accessToken = string.Empty;
                 lastSystemError = "(none)";
                 await client.ConnectAsync(operation.Token);
                 lastOperation = client.State == SessionState.Ready
                     ? "WebSocket opened and auth was sent. Ready is provisional because current v2 has no session.ready response."
                     : $"Connection attempt completed; current state is {client.State}. Use State as the source of truth.";
+                connectionDiagnostics?.OperationCompleted(LiveTestOperationKind.Connect, client.State);
             }
             catch (OperationCanceledException)
             {
                 lastOperation = "Connection cancelled.";
+                connectionDiagnostics?.OperationCancelled(LiveTestOperationKind.Connect);
             }
             catch (Exception exception)
             {
                 lastOperation = $"Connect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
+                connectionDiagnostics?.OperationFailed(LiveTestOperationKind.Connect, exception);
             }
             finally
             {
@@ -430,15 +515,20 @@ namespace SynthCohost.Runtime.Development
 
         private async void Reconnect()
         {
+            connectionDiagnostics?.OperationRequested(
+                LiveTestOperationKind.Reconnect,
+                client != null ? client.State : SessionState.Disconnected);
             if (client == null)
             {
                 lastOperation = "Client component is missing.";
+                connectionDiagnostics?.InputRejected(LiveTestInputFailure.MissingClient);
                 return;
             }
 
             if (client.State == SessionState.AuthRequired)
             {
                 lastOperation = "Paste a fresh token and use Connect; Reconnect will not reuse rejected credentials.";
+                connectionDiagnostics?.ReconnectRequiresFreshCredentials();
                 return;
             }
 
@@ -448,18 +538,23 @@ namespace SynthCohost.Runtime.Development
                         out _,
                         out var parsedAccessToken,
                         out var parsedAvatarId,
+                        out var validationFailure,
                         out var validationError))
                 {
                     lastOperation = validationError;
+                    connectionDiagnostics?.InputRejected(validationFailure);
                     return;
                 }
 
                 client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                connectionDiagnostics?.CredentialsStaged();
                 accessToken = string.Empty;
                 lastSystemError = "(none)";
             }
 
-            var operation = BeginOperation("Reconnecting with the current runtime credentials...");
+            var operation = BeginOperation(
+                LiveTestOperationKind.Reconnect,
+                "Reconnecting with the current runtime credentials...");
             if (operation == null)
             {
                 return;
@@ -467,18 +562,24 @@ namespace SynthCohost.Runtime.Development
 
             try
             {
+                connectionDiagnostics?.ConnectStarting(
+                    client.EffectiveEndpoint,
+                    settings != null ? settings.ConnectTimeout : TimeSpan.FromSeconds(75));
                 await client.ReconnectAsync(operation.Token);
                 lastOperation = client.State == SessionState.Ready
                     ? "Reconnected with a fresh session ID and sent auth; Ready remains provisional until backend activity."
                     : $"Reconnect completed with state {client.State}.";
+                connectionDiagnostics?.OperationCompleted(LiveTestOperationKind.Reconnect, client.State);
             }
             catch (OperationCanceledException)
             {
                 lastOperation = "Reconnect cancelled.";
+                connectionDiagnostics?.OperationCancelled(LiveTestOperationKind.Reconnect);
             }
             catch (Exception exception)
             {
                 lastOperation = $"Reconnect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
+                connectionDiagnostics?.OperationFailed(LiveTestOperationKind.Reconnect, exception);
             }
             finally
             {
@@ -488,10 +589,14 @@ namespace SynthCohost.Runtime.Development
 
         private async void Disconnect()
         {
+            connectionDiagnostics?.OperationRequested(
+                LiveTestOperationKind.Disconnect,
+                client != null ? client.State : SessionState.Disconnected);
             activeOperation?.Cancel();
             if (client == null)
             {
                 lastOperation = "Client component is missing.";
+                connectionDiagnostics?.InputRejected(LiveTestInputFailure.MissingClient);
                 return;
             }
 
@@ -499,23 +604,34 @@ namespace SynthCohost.Runtime.Development
             {
                 await client.DisconnectAsync();
                 lastOperation = "Disconnected.";
+                connectionDiagnostics?.OperationCompleted(LiveTestOperationKind.Disconnect, client.State);
             }
             catch (Exception exception)
             {
                 lastOperation = $"Disconnect failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
+                connectionDiagnostics?.OperationFailed(LiveTestOperationKind.Disconnect, exception);
             }
         }
 
         private async void SendTranscript(bool final)
         {
+            var operationKind = final
+                ? LiveTestOperationKind.SendFinal
+                : LiveTestOperationKind.SendPartial;
+            connectionDiagnostics?.OperationRequested(
+                operationKind,
+                client != null ? client.State : SessionState.Disconnected);
             var text = transcript?.Trim();
             if (string.IsNullOrWhiteSpace(text))
             {
                 lastOperation = "Enter transcript text before sending.";
+                connectionDiagnostics?.TranscriptMissing(final);
                 return;
             }
 
-            var operation = BeginOperation(final ? "Sending final transcript..." : "Sending partial transcript...");
+            var operation = BeginOperation(
+                operationKind,
+                final ? "Sending final transcript..." : "Sending partial transcript...");
             if (operation == null)
             {
                 return;
@@ -527,14 +643,17 @@ namespace SynthCohost.Runtime.Development
                     ? await client.SendFinalTranscriptAsync(text, operation.Token)
                     : await client.SendPartialTranscriptAsync(text, operation.Token);
                 lastOperation = FormatSendResult(final, result);
+                connectionDiagnostics?.SendCompleted(final, result);
             }
             catch (OperationCanceledException)
             {
                 lastOperation = "Send cancelled.";
+                connectionDiagnostics?.OperationCancelled(operationKind);
             }
             catch (Exception exception)
             {
                 lastOperation = $"Send failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
+                connectionDiagnostics?.OperationFailed(operationKind, exception);
             }
             finally
             {
@@ -546,19 +665,23 @@ namespace SynthCohost.Runtime.Development
             out Uri parsedEndpoint,
             out string parsedAccessToken,
             out Guid parsedAvatarId,
+            out LiveTestInputFailure failure,
             out string error)
         {
             parsedEndpoint = null;
             parsedAccessToken = string.Empty;
             parsedAvatarId = Guid.Empty;
+            failure = LiveTestInputFailure.None;
             if (client == null)
             {
+                failure = LiveTestInputFailure.MissingClient;
                 error = "Client component is missing.";
                 return false;
             }
 
             if (settings == null)
             {
+                failure = LiveTestInputFailure.MissingSettings;
                 error = "Connection settings asset is missing.";
                 return false;
             }
@@ -568,12 +691,14 @@ namespace SynthCohost.Runtime.Development
                     out parsedEndpoint,
                     out error))
             {
+                failure = LiveTestInputFailure.InvalidEndpoint;
                 return false;
             }
 
             parsedAccessToken = accessToken?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(parsedAccessToken))
             {
+                failure = LiveTestInputFailure.MissingToken;
                 error = "Paste a valid access token.";
                 return false;
             }
@@ -585,6 +710,7 @@ namespace SynthCohost.Runtime.Development
                 var now = DateTimeOffset.UtcNow;
                 if (expirationUtc <= now)
                 {
+                    failure = LiveTestInputFailure.ExpiredToken;
                     error =
                         $"Access token expired at {expirationUtc:HH:mm:ss} UTC. Paste a fresh token.";
                     return false;
@@ -592,6 +718,7 @@ namespace SynthCohost.Runtime.Development
 
                 if (expirationUtc - now < settings.ConnectTimeout + TimeSpan.FromSeconds(10))
                 {
+                    failure = LiveTestInputFailure.ExpiringSoonToken;
                     error =
                         "Access token expires too soon for a possible backend cold start. Paste a fresh token.";
                     return false;
@@ -600,6 +727,7 @@ namespace SynthCohost.Runtime.Development
 
             if (!Guid.TryParse(avatarId?.Trim(), out parsedAvatarId) || parsedAvatarId == Guid.Empty)
             {
+                failure = LiveTestInputFailure.InvalidAvatar;
                 error = "Enter a valid non-empty avatar UUID.";
                 return false;
             }
@@ -608,15 +736,21 @@ namespace SynthCohost.Runtime.Development
             return true;
         }
 
-        private CancellationTokenSource BeginOperation(string message)
+        private CancellationTokenSource BeginOperation(
+            LiveTestOperationKind operationKind,
+            string message)
         {
             if (activeOperation != null)
             {
                 lastOperation = "Another operation is already running.";
+                connectionDiagnostics?.OperationBusy();
                 return null;
             }
 
             activeOperation = new CancellationTokenSource();
+            activeOperationKind = operationKind;
+            activeOperationStartedRealtime = Time.realtimeSinceStartupAsDouble;
+            activeProgressNotice = 0;
             lastOperation = message;
             return activeOperation;
         }
@@ -629,21 +763,26 @@ namespace SynthCohost.Runtime.Development
             }
 
             activeOperation = null;
+            activeOperationKind = null;
+            activeProgressNotice = 0;
             operation.Dispose();
         }
 
         private void OnBehaviorApplied(AvatarBehavior behavior)
         {
             lastAvatarBehavior = behavior.ToWireValue();
+            connectionDiagnostics?.AvatarBehaviorReceived(behavior);
         }
 
         private void OnAiResponseReceived(AiResponsePayload response)
         {
             lastAiResponse = $"[{response.Emotion.ToWireValue()} / {response.Intent.ToWireValue()}] {response.Text}";
+            connectionDiagnostics?.AiResponseReceived(response.Emotion, response.Intent);
         }
 
         private void OnSystemErrorReceived(SystemErrorPayload error)
         {
+            connectionDiagnostics?.SystemErrorReceived(error?.Code);
             if (ProtocolSystemErrorCodes.IsAuthenticationFailure(error?.Code))
             {
                 lastSystemError =
