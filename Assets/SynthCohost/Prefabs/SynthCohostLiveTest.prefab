@@ -1,0 +1,109 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &4684977778715803926
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1510394298775741169}
+  - component: {fileID: 2537909737536515829}
+  - component: {fileID: 210665659856195531}
+  - component: {fileID: 5690674858012848206}
+  - component: {fileID: 7308675371954048694}
+  - component: {fileID: 2251666963005852869}
+  m_Layer: 0
+  m_Name: SynthCohostLiveTest
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1510394298775741169
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2537909737536515829
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9106594d9d4818542b3d1ea3f3839f63, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Bootstrap.SynthCohostClientBehaviour
+  settings: {fileID: 11400000, guid: 6d0b124e5874c36498778902141f98bf, type: 2}
+  avatarController: {fileID: 210665659856195531}
+  aiResponseSink: {fileID: 5690674858012848206}
+  systemErrorSink: {fileID: 7308675371954048694}
+--- !u!114 &210665659856195531
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ad68cba2c210491f9615f4e39dba70c2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Development.LiveTestAvatarBehaviorAdapter
+--- !u!114 &5690674858012848206
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fbd28cd0928f48789bf2f5dae4a5bfb1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Development.LiveTestAiResponseAdapter
+--- !u!114 &7308675371954048694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63e00296efe645e48b550a41ab398efa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Development.LiveTestSystemErrorAdapter
+--- !u!114 &2251666963005852869
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4684977778715803926}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e10838cd71364212882a638d6be432db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Development.SynthCohostLiveTestPanel
+  client: {fileID: 2537909737536515829}
+  settings: {fileID: 11400000, guid: 6d0b124e5874c36498778902141f98bf, type: 2}
+  avatarAdapter: {fileID: 210665659856195531}
+  aiResponseAdapter: {fileID: 5690674858012848206}
+  systemErrorAdapter: {fileID: 7308675371954048694}
+  panelWidth: 680
+  defaultTranscript: Hello from the Unity live test.

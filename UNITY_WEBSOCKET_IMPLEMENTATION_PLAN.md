@@ -1,17 +1,17 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Unity implementation foundation complete; authenticated live integration pending credentials.**
+Status: **Unity implementation foundation complete; authenticated v2 integration and broader backend release integration remain pending.**
 
-The live WebSocket and REST hosts are available. Authenticated end-to-end testing still requires a valid access token and avatar ID (or the exact REST auth/avatar flow to create them).
+The live WebSocket and REST hosts are available. Authenticated end-to-end testing still requires a valid access token and avatar ID (or the exact REST auth/avatar flow to create them). The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
 
-Implementation checkpoint (2026-07-14): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, and outbound rate safety are implemented under `Assets/SynthCohost`. Unity `6000.3.10f1` compiles the assemblies, and its native EditMode runner passes all 111 tests. PlayMode, Windows build, and credential-dependent live checks remain open.
+Implementation checkpoint (2026-07-16): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. Unity `6000.3.10f1` passes all 115 EditMode tests and the live-scene PlayMode smoke test. Windows build and credential-dependent live checks remain open.
 
 ## Source-of-truth order
 
 Use sources in this order when details conflict:
 
 1. `Assets/websocket-protocol-spec.docx` — canonical document covering current v2 and proposed 2.1.
-2. Backend developer confirmations recorded on 2026-07-13 and 2026-07-14 in §5.
+2. Backend/client confirmations recorded from 2026-07-13 through 2026-07-15 in §5.
 3. `E:\Downloads\test_ws.sh` — exact current-v2 happy-path wire example.
 4. `synth-cohost-unity-bridge` at commit `ca5bd8a` — exported Rust payload/type reference.
 5. `E:\Downloads\WEBSOCKET_DOCS_SAAD.md` — earlier draft notes; context only.
@@ -27,6 +27,7 @@ Build a modular Unity client that:
 - Connects to a complete `ws://` or `wss://` URL configured in one Inspector field.
 - Switches between local and live endpoints by changing only that URL, assuming credentials are valid for the selected environment.
 - Uses `wss://synth-cohost-app.onrender.com/ws` for the current live integration target.
+- Has no dependency on a frontend/Vercel deployment; frontend preview and production domains are not WebSocket endpoints.
 - Implements the deployed integer `v: 2` envelope.
 - Generates one client session ID per WebSocket connection and includes it on every frame, including auth.
 - Authenticates with a short-lived access token and one avatar UUID.
@@ -61,6 +62,7 @@ Build a modular Unity client that:
 ### Out of scope
 
 - Any backend or bridge change.
+- Dashboard/frontend labels, popups, graphics, layout, Vercel deployment, or domain configuration.
 - Backend AI, authentication internals, moderation, persistence, deployment, or rate-limit implementation.
 - Proposed 2.1 wire behavior until it is approved and deployed.
 - `session.ready` and server-generated session IDs in current v2.
@@ -77,9 +79,9 @@ Build a modular Unity client that:
 - Render pipeline: URP `17.3.0`.
 - Input System: `1.18.0`.
 - Test Framework: `1.6.0`.
-- One enabled starter scene: `Assets/Scenes/SampleScene.unity`.
+- Two enabled scenes: the clean starter `Assets/Scenes/SampleScene.unity` and configured `Assets/Scenes/SynthCohostLiveTest.unity`.
 - Networking, protocol, session, routing, adapter, bootstrap, and EditMode test architecture now lives under `Assets/SynthCohost`.
-- Five assembly definitions isolate protocol, transport, runtime, shared EditMode tests, and transport-internal tests.
+- Six assembly definitions isolate protocol, transport, runtime, shared EditMode tests, transport-internal tests, and PlayMode tests.
 - `Application.runInBackground` is disabled and must be enabled for reliable heartbeat behavior while unfocused.
 - `System.Net.WebSockets.ClientWebSocket` is available for the current Windows/.NET target.
 
@@ -202,10 +204,10 @@ Exact current frame:
 | Type | Payload | Unity behavior |
 |---|---|---|
 | `avatar.state` | `{ behavior }` | Request a behavior transition through an avatar adapter. |
-| `ai.response` | `{ text, emotion, intent }` | Publish typed response/caption data. The live endpoint uses the real AI/moderation pipeline; local/dev environments may still use a mock provider. |
+| `ai.response` | `{ text, emotion, intent }` | Publish typed response/caption data. The current live v2 happy path returns AI/moderation responses, but broader production runtime integrations and mock replacement are still in progress. |
 | `system.error` | `{ code, message }` | Publish a sanitized error; the connection may remain open or a close may follow. |
 
-The backend confirms the live `stt.final → AI generation → moderation → response` pipeline works end to end. Expected response flow:
+The backend previously confirmed that the live current-v2 `stt.final → AI generation → moderation → response` happy path works end to end. The 2026-07-15 update also says Attention Routing, Event Response, Memory, and remaining mock replacements are still being integrated, so this does not yet prove that every response is backed by the final production runtime. Expected current response flow:
 
 1. `avatar.state` with `thinking`.
 2. Another `avatar.state` containing the generated response behavior.
@@ -347,7 +349,27 @@ The backend developer confirmed:
 
 An unauthenticated connectivity probe on 2026-07-14 confirmed that the warm live WebSocket accepted a TLS/WebSocket upgrade. The REST host also responded, although its base `/` route returns 404. No token or application frame was sent, so authenticated v2 behavior still requires credentials to verify.
 
-### 5.7 Final implementation decision
+### 5.7 Client and backend integration update — 2026-07-15
+
+The client clarified:
+
+- The shared Vercel URL is a temporary frontend review deployment, not the production frontend or a Unity/backend endpoint.
+- The final production frontend deployment/domain will be supplied after the frontend is merged.
+- Dashboard label, popup, graphic, and layout changes are frontend-only and do not change the deployed Unity v2 contract.
+- Unity must not hardcode or depend on either the temporary or final frontend URL. It continues to use the separately configurable backend WebSocket endpoint.
+- The wider dashboard panel intended for live-avatar testing introduces an unresolved presentation boundary: confirm whether it will show a Windows client, WebGL embed, captured/streamed output, or another integration before changing the Unity build target.
+
+The backend status update says:
+
+- Authentication, WebSockets, moderation, storage, and API infrastructure are reported stable.
+- Attention Routing, Event Response, and Memory are being connected to the existing runtime.
+- Remaining mock services are being replaced with production integrations.
+- Communication protocols are still being finalized.
+- No new Unity-visible event type, payload, ordering rule, protocol version, or endpoint accompanied this update.
+
+This is release-readiness context, not a replacement wire contract. Continue using deployed v2 until the backend supplies an explicit versioned protocol change. Do not implement Unity handlers for the named runtime systems unless they expose Unity-facing events with schemas, ordering/correlation/error rules, fixtures, and a migration date.
+
+### 5.8 Final implementation decision
 
 Implement one deployed-v2 dialect now. Do not build a hybrid or Inspector toggle between current v2 and proposed 2.1. Isolate protocol/session ownership and reconnect behavior behind interfaces, while keeping avatar, AI-response, STT, and UI code independent.
 
@@ -391,7 +413,10 @@ It confirms the broad v2 envelope, auth/avatar purpose, event names, fixed heart
 | Single final-turn workflow | Ready. |
 | Avatar/AI/error adapters | Ready. |
 | Live endpoint connectivity | Verified while warm; authenticated test credentials are still required. |
-| Live text/AI/moderation pipeline | Confirmed working by the backend developer. |
+| Frontend/Vercel deployment | Not a Unity networking dependency; the production frontend domain is still pending. |
+| Live text/AI/moderation happy path | Previously confirmed working for current v2; final production-runtime/mock status must be revalidated. |
+| Backend runtime integrations | Attention Routing, Event Response, Memory, mock replacement, and communication-protocol finalization are still in progress; no Unity-visible delta supplied. |
+| Live avatar presentation boundary | Needs confirmation before choosing Windows-only, WebGL, captured/streamed output, or another delivery path. |
 | Local happy-path integration | Optional; requires the full backend workspace and local credentials. |
 | Unity-owned register/login/avatar creation | Needs the exact HTTP API contract if included. |
 | Full close/error acceptance | Needs backend fixtures or manual test cases. |
@@ -419,6 +444,9 @@ Before release, obtain:
 - Live credentials and, if required, a separate staging endpoint/account.
 - Final reconnect and response-ordering sign-off.
 - Repeatable close-code/error cases.
+- A real-versus-mock environment matrix and confirmation that the required production runtime integrations are active.
+- A versioned protocol diff plus fixtures for any Unity-visible change introduced by the finalized communication protocols.
+- The dashboard live-avatar delivery method and resulting Unity build/deployment target.
 
 ## 7. Proposed Unity architecture
 
@@ -540,12 +568,17 @@ Requirements:
 - [x] Review the attached smoke script and earlier Markdown.
 - [x] Confirm the live WebSocket and REST base URLs.
 - [x] Confirm Render's approximately 15-minute idle sleep and up-to-50-second cold start.
-- [x] Confirm the live text → AI → moderation → response pipeline is operational.
+- [x] Record the backend's confirmation that the current-v2 text → AI → moderation → response happy path is operational.
 - [x] Reconfirm that real audio STT/TTS and v2.1 remain pending.
+- [x] Confirm Unity has no dependency on the temporary Vercel frontend URL.
+- [x] Record the 2026-07-15 integration-stage update; it supplied no current-v2 frame change.
 - [ ] Obtain non-committed test credentials/avatar before authenticated live integration testing.
 - [ ] Obtain the HTTP auth/avatar contract only if Unity must implement that flow.
+- [ ] Confirm how the dashboard live-avatar panel will receive Unity output: Windows client, WebGL embed, captured/streamed output, or another integration.
+- [ ] Reconfirm which live services are production-backed versus mocked before release acceptance.
+- [ ] Obtain an updated DOCX/versioned protocol diff and fixtures if finalized runtime systems introduce Unity-visible changes.
 
-Exit: protocol implementation may start now; open items affect integration/account provisioning only.
+Exit: current-v2 implementation may proceed; open items affect scene integration, production acceptance, account provisioning, and release packaging.
 
 ### Phase 1 — Project foundation
 
@@ -556,7 +589,7 @@ Exit: protocol implementation may start now; open items affect integration/accou
 - [x] Use `ClientWebSocket` for the current Windows target behind `IWebSocketTransport`.
 - [x] Keep room for a separate mobile/WebGL transport adapter without changing session or feature code.
 - [x] Enable `Application.runInBackground` through bootstrap/settings.
-- [ ] Add a dedicated bootstrap prefab or integration scene without coupling networking to sample-scene content.
+- [x] Add a dedicated bootstrap prefab and integration scene without coupling networking to sample-scene content.
 
 Exit: assemblies compile and EditMode/PlayMode test assemblies run.
 
@@ -667,7 +700,7 @@ Exit: routing tests cover every known message, unknown types, malformed payloads
 #### AI response
 
 - [x] Publish text, emotion, and intent as a typed event.
-- [x] Accept nondeterministic live AI text; validate shape, enums, moderation-safe flow, and non-empty response rather than exact wording. Local/dev environments may still return mock text.
+- [x] Accept nondeterministic AI text; validate shape, enums, moderation-safe flow, and non-empty response rather than exact wording. Environment-specific production/mock behavior must be confirmed before release acceptance.
 - [x] Add replaceable caption/presentation subscribers when UI exists.
 - [x] Keep emotion and intent available for later presentation logic.
 
@@ -694,6 +727,7 @@ Exit: fake feature adapters prove correct dispatch and acknowledgements.
 - [x] Reference settings and adapters through serialized fields/composition.
 - [x] Validate missing settings, invalid URL, or missing providers in the Inspector.
 - [x] Support auto-connect and explicit Connect/Disconnect/Reconnect.
+- [x] Add a credential-safe live-test panel for runtime connect, transcript sends, avatar state, AI response, and system-error inspection.
 - [ ] Decide whether the client persists across scenes and enforce one instance if it does.
 - [ ] Add a developer status view: `Connecting`/`Waking server`, elapsed connect time, endpoint host, session presence, last event, reconnect attempt, current-turn status, and sanitized error.
 - [ ] Verify changing only `Endpoint URL` switches local/live socket targets.
@@ -721,13 +755,16 @@ Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
 - [ ] Verify no `session.ready`/heartbeat ack is required.
 - [ ] Remain connected for more than 60 seconds while 20-second heartbeats prevent close 4003.
 - [ ] Run a connected soak test beyond 15 minutes to confirm heartbeat traffic keeps the live service/session active.
-- [ ] Send one final transcript and verify the live AI/moderation pipeline produces thinking, response behavior, and a valid non-empty AI response.
+- [ ] Send one final transcript and verify the current live v2 path produces thinking, response behavior, and a valid non-empty AI response.
 - [ ] Verify the final-turn gate rejects a second simultaneous turn.
 - [ ] Apply avatar behavior and verify state ack server-side.
 - [ ] Exercise partial transcript behavior if included in the milestone.
 - [ ] Exercise malformed/auth/session/heartbeat/rate-limit close cases through backend fixtures or manual cases.
 - [ ] Force network loss and prove a new session ID, fresh auth, and no replay.
 - [ ] Confirm unknown future types do not break the session.
+- [ ] After backend runtime integration and mock replacement are declared complete, repeat authenticated text-flow acceptance against the documented production services.
+- [ ] Run a contract regression against the finalized communication protocol and fixtures before release.
+- [ ] If Attention Routing, Event Response, or Memory becomes Unity-visible, test only the explicitly documented events and semantics.
 - [ ] If local backend access is provided, change only the Inspector endpoint to `ws://127.0.0.1:8080/ws` and repeat the socket happy path with local credentials.
 
 Exit: the live endpoint passes warm/cold authenticated tests, and optional local testing requires only the endpoint URL change on the socket client.
@@ -756,6 +793,7 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### PlayMode
 
+- [x] Dedicated live-test scene loads with configured client/adapters and waits safely for runtime credentials.
 - [ ] Bootstrap lifecycle and single-instance behavior.
 - [ ] Main-thread delivery to fake avatar/UI adapters.
 - [ ] Application focus/background heartbeat behavior.
@@ -765,8 +803,8 @@ Exit: the live endpoint passes warm/cold authenticated tests, and optional local
 
 ### Build
 
-- [x] Run the EditMode suite in Unity `6000.3.10f1` (111/111 passing on 2026-07-14).
-- [ ] Add and run the PlayMode suite.
+- [x] Run the EditMode suite in Unity `6000.3.10f1` (115/115 passing on 2026-07-16).
+- [x] Add and run the PlayMode suite (live-scene smoke test 1/1 passing on 2026-07-16).
 - [ ] Produce and smoke-test a Windows Standalone development build.
 - [ ] Verify IL2CPP/AOT serialization if Android/iOS becomes in scope.
 - [ ] Add a WebGL transport/build test only if WebGL becomes an approved target.
@@ -801,11 +839,13 @@ Every commit must remain Unity-only and exclude the ignored bridge repository.
 - [ ] EditMode, PlayMode, Windows build, and real-backend tests pass.
 - [ ] The exact live endpoint passes warm and cold-start-aware authenticated tests without reconnect storms.
 - [ ] Local/live socket switching requires only the Inspector endpoint URL change.
+- [ ] Finalized backend communication-protocol regression and production-runtime acceptance pass.
+- [ ] The dashboard live-avatar delivery method and Unity build target are agreed before release packaging.
 - [x] The bridge folder remains ignored, clean, and unmodified.
 
 ## Final readiness answer
 
-The Unity client foundation is implemented and its 111 EditMode tests pass in Unity. We are ready for scene-level PlayMode wiring and authenticated live testing; the warm live WebSocket endpoint is reachable, and the backend confirms the text/AI/moderation pipeline is operational.
+The Unity current-v2 foundation and dedicated live-test scene are implemented. All 115 EditMode tests and the live-scene PlayMode smoke test pass in Unity. The scene is ready for authenticated happy-path testing as soon as a valid short-lived token and matching avatar UUID are supplied. The frontend/Vercel deployment does not change the Unity socket implementation. Broader production acceptance remains dependent on the backend finishing its runtime integrations, replacing remaining mocks, and finalizing any Unity-visible communication-protocol changes.
 
 The remaining inputs are for integration and release validation:
 
@@ -813,3 +853,5 @@ The remaining inputs are for integration and release validation:
 2. Exact REST auth/avatar schemas only if Unity must implement register/login/avatar creation.
 3. A separate staging endpoint/account only if staging is required.
 4. Final reconnect/ordering rules before release sign-off.
+5. A real-versus-mock environment matrix and versioned protocol diff/fixtures for any finalized Unity-visible changes.
+6. Confirmation of how the dashboard will display the live Unity avatar and which build/deployment target that requires.
