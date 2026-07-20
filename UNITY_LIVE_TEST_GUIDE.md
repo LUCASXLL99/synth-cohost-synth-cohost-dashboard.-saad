@@ -86,9 +86,14 @@ Local-file shape:
 {
   "endpointUrl": "wss://synth-cohost-app.onrender.com/ws",
   "accessToken": "paste-a-fresh-short-lived-token",
-  "avatarId": "00000000-0000-0000-0000-000000000000"
+  "avatarId": "00000000-0000-0000-0000-000000000000",
+  "refreshToken": "optional-long-lived-refresh-token",
+  "email": "optional-test-account@example.com",
+  "password": "optional-test-password"
 }
 ```
+
+Optional `refreshToken` or `email`+`password` enable the panel **Refresh token** button. That button calls the live REST `/auth/refresh` (or `/auth/login`) route, fills the Access token field, and updates this local draft. Access tokens still expire in about 15 minutes; use Refresh token right before Connect.
 
 `UserSettings/` is Git-ignored. The local file is still plaintext on this computer, so use it only for development, replace expired tokens promptly, and delete it when no longer needed.
 

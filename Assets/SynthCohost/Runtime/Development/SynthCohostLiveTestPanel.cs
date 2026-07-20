@@ -76,7 +76,11 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private string endpointUrl = string.Empty;
         [NonSerialized] private string accessToken = string.Empty;
         [NonSerialized] private string avatarId = string.Empty;
+        [NonSerialized] private string refreshToken = string.Empty;
+        [NonSerialized] private string accountEmail = string.Empty;
+        [NonSerialized] private string accountPassword = string.Empty;
         [NonSerialized] private string placeholderSourceSummary = "settings/manual";
+        [NonSerialized] private bool hasTokenRefreshCredentials;
         [NonSerialized] private string transcript = string.Empty;
         [NonSerialized] private string lastOperation = "Enter a temporary token and avatar UUID, then click Connect.";
         [NonSerialized] private string lastAvatarBehavior = "(none)";
@@ -112,6 +116,10 @@ namespace SynthCohost.Runtime.Development
             endpointUrl = placeholders.EndpointUrl;
             accessToken = placeholders.AccessToken;
             avatarId = placeholders.AvatarId;
+            refreshToken = placeholders.RefreshToken;
+            accountEmail = placeholders.Email;
+            accountPassword = placeholders.Password;
+            hasTokenRefreshCredentials = placeholders.HasTokenRefreshCredentials;
             placeholderSourceSummary = placeholders.SourceSummary;
             if (!string.IsNullOrWhiteSpace(placeholders.SafeNotice))
             {
@@ -120,8 +128,9 @@ namespace SynthCohost.Runtime.Development
             else if (!string.IsNullOrWhiteSpace(accessToken) ||
                      !string.IsNullOrWhiteSpace(avatarId))
             {
-                lastOperation =
-                    "Review the loaded runtime placeholders, replace any expired value, then click Connect.";
+                lastOperation = hasTokenRefreshCredentials
+                    ? "Review the loaded runtime placeholders. Use Refresh token if the access token is expired, then click Connect."
+                    : "Review the loaded runtime placeholders, replace any expired value, then click Connect.";
             }
 
             connectionDiagnostics = new LiveTestConnectionDiagnostics(this);
@@ -336,6 +345,30 @@ namespace SynthCohost.Runtime.Development
                 accessToken ?? string.Empty,
                 '*',
                 GUILayout.Width(controlWidth));
+            GUI.enabled = previousEnabled;
+
+            var canRefreshToken = !IsBusy && hasTokenRefreshCredentials &&
+                                  (state == SessionState.Disconnected ||
+                                   state == SessionState.AuthRequired ||
+                                   state == SessionState.Faulted ||
+                                   state == SessionState.Ready);
+            if (DrawActionButton("Refresh token", canRefreshToken, controlWidth))
+            {
+                RefreshAccessToken();
+            }
+
+            GUILayout.Label(
+                hasTokenRefreshCredentials
+                    ? "Refresh token uses the local UserSettings draft (refreshToken or email+password)."
+                    : "Add refreshToken or email+password to UserSettings/SynthCohostLiveTest.local.json to enable Refresh token.",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
+
+            GUI.enabled = previousEnabled && !IsBusy &&
+                          (state == SessionState.Disconnected ||
+                           state == SessionState.AuthRequired ||
+                           state == SessionState.Faulted ||
+                           state == SessionState.Ready);
             GUILayout.Label("Avatar UUID");
             avatarId = GUILayout.TextField(avatarId ?? string.Empty, GUILayout.Width(controlWidth));
             GUI.enabled = previousEnabled;
@@ -448,6 +481,107 @@ namespace SynthCohost.Runtime.Development
                     entry.ToDisplayLine(),
                     wrappedLabelStyle,
                     GUILayout.Width(controlWidth));
+            }
+        }
+
+        private async void RefreshAccessToken()
+        {
+            connectionDiagnostics?.OperationRequested(
+                LiveTestOperationKind.RefreshToken,
+                client != null ? client.State : SessionState.Disconnected);
+
+            if (!hasTokenRefreshCredentials)
+            {
+                lastOperation =
+                    "Add refreshToken or email+password to UserSettings/SynthCohostLiveTest.local.json first.";
+                connectionDiagnostics?.InputRejected(LiveTestInputFailure.MissingRefreshCredentials);
+                return;
+            }
+
+            if (!LiveTestAccessTokenRefresher.TryBuildRestBaseUri(
+                    endpointUrl,
+                    out var restBase,
+                    out var endpointError))
+            {
+                lastOperation = endpointError;
+                connectionDiagnostics?.InputRejected(LiveTestInputFailure.InvalidEndpoint);
+                return;
+            }
+
+            var operation = BeginOperation(
+                LiveTestOperationKind.RefreshToken,
+                "Refreshing access token from the live auth API...");
+            if (operation == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = await LiveTestAccessTokenRefresher.RefreshAsync(
+                    restBase,
+                    refreshToken,
+                    accountEmail,
+                    accountPassword,
+                    operation.Token);
+
+                if (!result.Succeeded)
+                {
+                    lastOperation = result.SafeError;
+                    connectionDiagnostics?.TokenRefreshRejected();
+                    return;
+                }
+
+                accessToken = result.AccessToken;
+                if (!string.IsNullOrWhiteSpace(result.RefreshToken))
+                {
+                    refreshToken = result.RefreshToken;
+                }
+
+                hasTokenRefreshCredentials =
+                    !string.IsNullOrWhiteSpace(refreshToken) ||
+                    (!string.IsNullOrWhiteSpace(accountEmail) &&
+                     !string.IsNullOrWhiteSpace(accountPassword));
+
+                if (!LiveTestPlaceholderSource.TrySaveLocalDraft(
+                        endpointUrl,
+                        accessToken,
+                        avatarId,
+                        refreshToken,
+                        accountEmail,
+                        accountPassword,
+                        out var saveError))
+                {
+                    lastOperation =
+                        $"Fresh access token loaded into the panel, but the local draft was not updated. {saveError}";
+                    connectionDiagnostics?.OperationCompleted(
+                        LiveTestOperationKind.RefreshToken,
+                        client != null ? client.State : SessionState.Disconnected);
+                    return;
+                }
+
+                lastOperation =
+                    result.Method == LiveTestTokenRefreshMethod.RefreshToken
+                        ? $"Fresh access token loaded via refreshToken. {FormatTokenStatus(accessToken)}"
+                        : $"Fresh access token loaded via email/password login. {FormatTokenStatus(accessToken)}";
+                connectionDiagnostics?.OperationCompleted(
+                    LiveTestOperationKind.RefreshToken,
+                    client != null ? client.State : SessionState.Disconnected);
+            }
+            catch (OperationCanceledException)
+            {
+                lastOperation = "Token refresh cancelled.";
+                connectionDiagnostics?.OperationCancelled(LiveTestOperationKind.RefreshToken);
+            }
+            catch (Exception exception)
+            {
+                lastOperation =
+                    $"Token refresh failed ({exception.GetType().Name}). Check the safe Console diagnostics.";
+                connectionDiagnostics?.OperationFailed(LiveTestOperationKind.RefreshToken, exception);
+            }
+            finally
+            {
+                EndOperation(operation);
             }
         }
 

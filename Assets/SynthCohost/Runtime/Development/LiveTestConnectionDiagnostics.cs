@@ -12,7 +12,8 @@ namespace SynthCohost.Runtime.Development
         Reconnect,
         Disconnect,
         SendPartial,
-        SendFinal
+        SendFinal,
+        RefreshToken
     }
 
     internal enum LiveTestInputFailure
@@ -24,7 +25,8 @@ namespace SynthCohost.Runtime.Development
         MissingToken,
         ExpiredToken,
         ExpiringSoonToken,
-        InvalidAvatar
+        InvalidAvatar,
+        MissingRefreshCredentials
     }
 
     internal enum LiveTestActivitySeverity
@@ -112,6 +114,13 @@ namespace SynthCohost.Runtime.Development
         internal void InputRejected(LiveTestInputFailure failure)
         {
             Write(LiveTestActivitySeverity.Error, GetInputFailureMessage(failure));
+        }
+
+        internal void TokenRefreshRejected()
+        {
+            Write(
+                LiveTestActivitySeverity.Error,
+                "Token refresh failed; credentials and response body were not logged. Check Last operation for the safe reason.");
         }
 
         internal void OperationBusy()
@@ -290,6 +299,8 @@ namespace SynthCohost.Runtime.Development
                     return "Connect blocked before network use: access token expires too soon for a possible cold start.";
                 case LiveTestInputFailure.InvalidAvatar:
                     return "Connect blocked before network use: avatar UUID is invalid or empty.";
+                case LiveTestInputFailure.MissingRefreshCredentials:
+                    return "Token refresh blocked: add refreshToken or email+password to the local UserSettings draft.";
                 default:
                     return "Connect blocked before network use: input validation failed.";
             }
@@ -309,6 +320,8 @@ namespace SynthCohost.Runtime.Development
                     return "Partial transcript send";
                 case LiveTestOperationKind.SendFinal:
                     return "Final transcript send";
+                case LiveTestOperationKind.RefreshToken:
+                    return "Token refresh";
                 default:
                     return "Operation";
             }

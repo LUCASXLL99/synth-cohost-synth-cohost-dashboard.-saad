@@ -31,6 +31,9 @@ namespace SynthCohost.Tests.EditMode.Development
         [TestCase(
             (int)LiveTestInputFailure.InvalidAvatar,
             "Connect blocked before network use: avatar UUID is invalid or empty.")]
+        [TestCase(
+            (int)LiveTestInputFailure.MissingRefreshCredentials,
+            "Token refresh blocked: add refreshToken or email+password to the local UserSettings draft.")]
         public void InputRejected_LogsAnExactSafeReason(
             int failureValue,
             string expected)

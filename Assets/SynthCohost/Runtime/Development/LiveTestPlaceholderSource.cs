@@ -11,12 +11,18 @@ namespace SynthCohost.Runtime.Development
             string endpointUrl,
             string accessToken,
             string avatarId,
+            string refreshToken,
+            string email,
+            string password,
             string sourceSummary,
             string safeNotice)
         {
             EndpointUrl = endpointUrl ?? string.Empty;
             AccessToken = accessToken ?? string.Empty;
             AvatarId = avatarId ?? string.Empty;
+            RefreshToken = refreshToken ?? string.Empty;
+            Email = email ?? string.Empty;
+            Password = password ?? string.Empty;
             SourceSummary = sourceSummary ?? "settings/manual";
             SafeNotice = safeNotice ?? string.Empty;
         }
@@ -24,8 +30,19 @@ namespace SynthCohost.Runtime.Development
         public string EndpointUrl { get; }
         public string AccessToken { get; }
         public string AvatarId { get; }
+        public string RefreshToken { get; }
+        public string Email { get; }
+        public string Password { get; }
         public string SourceSummary { get; }
         public string SafeNotice { get; }
+
+        public bool HasTokenRefreshCredentials =>
+            HasValue(RefreshToken) || (HasValue(Email) && HasValue(Password));
+
+        private static bool HasValue(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value);
+        }
     }
 
     internal static class LiveTestPlaceholderSource
@@ -42,6 +59,9 @@ namespace SynthCohost.Runtime.Development
             public string endpointUrl;
             public string accessToken;
             public string avatarId;
+            public string refreshToken;
+            public string email;
+            public string password;
         }
 
         internal static LiveTestPlaceholderDraft Load(string fallbackEndpoint)
@@ -120,7 +140,10 @@ namespace SynthCohost.Runtime.Development
             if (local != null &&
                 (HasValue(local.endpointUrl) ||
                  HasValue(local.accessToken) ||
-                 HasValue(local.avatarId)))
+                 HasValue(local.avatarId) ||
+                 HasValue(local.refreshToken) ||
+                 HasValue(local.email) ||
+                 HasValue(local.password)))
             {
                 sources.Add("local UserSettings file");
             }
@@ -142,8 +165,50 @@ namespace SynthCohost.Runtime.Development
                 endpoint,
                 token,
                 avatar,
+                local?.refreshToken,
+                local?.email,
+                local?.password,
                 sources.Count == 0 ? "settings/manual" : string.Join(" + ", sources),
                 safeNotice);
+        }
+
+        internal static bool TrySaveLocalDraft(
+            string endpointUrl,
+            string accessToken,
+            string avatarId,
+            string refreshToken,
+            string email,
+            string password,
+            out string safeError)
+        {
+            safeError = string.Empty;
+            try
+            {
+                var path = GetDefaultLocalPath();
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                var draft = new LocalPlaceholderJson
+                {
+                    endpointUrl = endpointUrl ?? string.Empty,
+                    accessToken = accessToken ?? string.Empty,
+                    avatarId = avatarId ?? string.Empty,
+                    refreshToken = refreshToken ?? string.Empty,
+                    email = email ?? string.Empty,
+                    password = password ?? string.Empty
+                };
+                File.WriteAllText(path, JsonUtility.ToJson(draft, true));
+                return true;
+            }
+            catch (Exception exception)
+            {
+                safeError =
+                    $"Local placeholder file could not be updated ({exception.GetType().Name}).";
+                return false;
+            }
         }
 
         internal static string GetDefaultLocalPath()

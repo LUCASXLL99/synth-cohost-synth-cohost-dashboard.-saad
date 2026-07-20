@@ -18,7 +18,10 @@ namespace SynthCohost.Tests.EditMode.Development
             const string json =
                 "{\"endpointUrl\":\"ws://127.0.0.1:8080/ws\"," +
                 "\"accessToken\":\"fake-local-token\"," +
-                "\"avatarId\":\"11111111-1111-1111-1111-111111111111\"}";
+                "\"avatarId\":\"11111111-1111-1111-1111-111111111111\"," +
+                "\"refreshToken\":\"fake-refresh-token\"," +
+                "\"email\":\"tester@example.com\"," +
+                "\"password\":\"fake-password\"}";
 
             var draft = LiveTestPlaceholderSource.Resolve(
                 SynthCohostConnectionSettings.DefaultLiveEndpoint,
@@ -30,7 +33,35 @@ namespace SynthCohost.Tests.EditMode.Development
             Assert.That(draft.EndpointUrl, Is.EqualTo("ws://127.0.0.1:8080/ws"));
             Assert.That(draft.AccessToken, Is.EqualTo("fake-local-token"));
             Assert.That(draft.AvatarId, Is.EqualTo("11111111-1111-1111-1111-111111111111"));
+            Assert.That(draft.RefreshToken, Is.EqualTo("fake-refresh-token"));
+            Assert.That(draft.Email, Is.EqualTo("tester@example.com"));
+            Assert.That(draft.Password, Is.EqualTo("fake-password"));
+            Assert.That(draft.HasTokenRefreshCredentials, Is.True);
             Assert.That(draft.SourceSummary, Does.Contain("local UserSettings file"));
+        }
+
+        [TestCase("wss://synth-cohost-app.onrender.com/ws", "https://synth-cohost-app.onrender.com/")]
+        [TestCase("ws://127.0.0.1:8080/ws", "http://127.0.0.1:8080/")]
+        public void RestBaseUri_IsDerivedFromWebSocketEndpoint(string websocket, string expectedRest)
+        {
+            Assert.That(
+                LiveTestAccessTokenRefresher.TryBuildRestBaseUri(websocket, out var restBase, out var error),
+                Is.True);
+            Assert.That(error, Is.Empty);
+            Assert.That(restBase.AbsoluteUri, Is.EqualTo(expectedRest));
+        }
+
+        [Test]
+        public void RestBaseUri_RejectsUnsafeWebSocketEndpoint()
+        {
+            Assert.That(
+                LiveTestAccessTokenRefresher.TryBuildRestBaseUri(
+                    "wss://user:secret@example.com/ws?token=1",
+                    out _,
+                    out var error),
+                Is.False);
+            Assert.That(error, Is.Not.Empty);
+            Assert.That(error, Does.Not.Contain("secret"));
         }
 
         [Test]
