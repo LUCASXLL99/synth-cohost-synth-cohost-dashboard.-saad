@@ -37,7 +37,7 @@ namespace SynthCohost.Tests.EditMode.Development
             Assert.That(draft.Email, Is.EqualTo("tester@example.com"));
             Assert.That(draft.Password, Is.EqualTo("fake-password"));
             Assert.That(draft.HasTokenRefreshCredentials, Is.True);
-            Assert.That(draft.SourceSummary, Does.Contain("local UserSettings file"));
+            Assert.That(draft.SourceSummary, Does.Contain("local credentials file"));
         }
 
         [TestCase("wss://synth-cohost-app.onrender.com/ws", "https://synth-cohost-app.onrender.com/")]
@@ -62,6 +62,25 @@ namespace SynthCohost.Tests.EditMode.Development
                 Is.False);
             Assert.That(error, Is.Not.Empty);
             Assert.That(error, Does.Not.Contain("secret"));
+        }
+
+        [Test]
+        public void CandidateLocalPaths_IncludeEditorPersistentAndBuildFolderLocations()
+        {
+            var paths = LiveTestPlaceholderSource.GetCandidateLocalPaths();
+
+            Assert.That(paths, Is.Not.Empty);
+            Assert.That(
+                paths,
+                Has.Some.Matches<string>(path =>
+                    Path.GetFileName(path) == LiveTestPlaceholderSource.LocalFileName));
+            Assert.That(
+                paths,
+                Has.Some.Matches<string>(path =>
+                    path.IndexOf("UserSettings", StringComparison.OrdinalIgnoreCase) >= 0));
+            Assert.That(
+                LiveTestPlaceholderSource.GetPreferredWritablePath(),
+                Does.EndWith(LiveTestPlaceholderSource.LocalFileName));
         }
 
         [Test]

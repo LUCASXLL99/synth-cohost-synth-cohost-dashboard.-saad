@@ -294,13 +294,13 @@ namespace SynthCohost.Runtime.Development
                 case LiveTestInputFailure.MissingToken:
                     return "Connect blocked before network use: access token is missing.";
                 case LiveTestInputFailure.ExpiredToken:
-                    return "Connect blocked before network use: access token is expired; paste a fresh token.";
+                    return "Connect blocked before network use: access token is expired; click Get access token.";
                 case LiveTestInputFailure.ExpiringSoonToken:
                     return "Connect blocked before network use: access token expires too soon for a possible cold start.";
                 case LiveTestInputFailure.InvalidAvatar:
                     return "Connect blocked before network use: avatar UUID is invalid or empty.";
                 case LiveTestInputFailure.MissingRefreshCredentials:
-                    return "Token refresh blocked: add refreshToken or email+password to the local UserSettings draft.";
+                    return "Get access token blocked: enter account email and password in the panel first.";
                 default:
                     return "Connect blocked before network use: input validation failed.";
             }
@@ -321,7 +321,7 @@ namespace SynthCohost.Runtime.Development
                 case LiveTestOperationKind.SendFinal:
                     return "Final transcript send";
                 case LiveTestOperationKind.RefreshToken:
-                    return "Token refresh";
+                    return "Get access token";
                 default:
                     return "Operation";
             }

@@ -80,7 +80,6 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private string accountEmail = string.Empty;
         [NonSerialized] private string accountPassword = string.Empty;
         [NonSerialized] private string placeholderSourceSummary = "settings/manual";
-        [NonSerialized] private bool hasTokenRefreshCredentials;
         [NonSerialized] private string transcript = string.Empty;
         [NonSerialized] private string lastOperation = "Enter a temporary token and avatar UUID, then click Connect.";
         [NonSerialized] private string lastAvatarBehavior = "(none)";
@@ -101,6 +100,11 @@ namespace SynthCohost.Runtime.Development
 
         private bool IsBusy => activeOperation != null;
 
+        private bool HasTokenRefreshCredentials =>
+            !string.IsNullOrWhiteSpace(refreshToken) ||
+            (!string.IsNullOrWhiteSpace(accountEmail) &&
+             !string.IsNullOrWhiteSpace(accountPassword));
+
         private void Awake()
         {
             client ??= GetComponent<SynthCohostClientBehaviour>();
@@ -119,18 +123,26 @@ namespace SynthCohost.Runtime.Development
             refreshToken = placeholders.RefreshToken;
             accountEmail = placeholders.Email;
             accountPassword = placeholders.Password;
-            hasTokenRefreshCredentials = placeholders.HasTokenRefreshCredentials;
             placeholderSourceSummary = placeholders.SourceSummary;
             if (!string.IsNullOrWhiteSpace(placeholders.SafeNotice))
             {
                 lastOperation = placeholders.SafeNotice;
             }
+            else if (HasTokenRefreshCredentials)
+            {
+                lastOperation =
+                    "Enter or confirm account email/password, click Get access token, then Connect.";
+            }
             else if (!string.IsNullOrWhiteSpace(accessToken) ||
                      !string.IsNullOrWhiteSpace(avatarId))
             {
-                lastOperation = hasTokenRefreshCredentials
-                    ? "Review the loaded runtime placeholders. Use Refresh token if the access token is expired, then click Connect."
-                    : "Review the loaded runtime placeholders, replace any expired value, then click Connect.";
+                lastOperation =
+                    "Review the loaded values, or enter email/password and click Get access token, then Connect.";
+            }
+            else
+            {
+                lastOperation =
+                    "Enter account email, password, and avatar UUID. Click Get access token, then Connect.";
             }
 
             connectionDiagnostics = new LiveTestConnectionDiagnostics(this);
@@ -323,55 +335,64 @@ namespace SynthCohost.Runtime.Development
         {
             GUILayout.Space(8f);
             GUILayout.Label("Runtime connection inputs", sectionStyle);
-            GUILayout.Label("WebSocket endpoint (editable while disconnected)");
             var previousEnabled = GUI.enabled;
             var state = client != null ? client.State : SessionState.Disconnected;
-            GUI.enabled = previousEnabled && !IsBusy &&
-                          (state == SessionState.Disconnected ||
-                           state == SessionState.AuthRequired ||
-                           state == SessionState.Faulted);
+            var canEditConnectionInputs = previousEnabled && !IsBusy &&
+                                          (state == SessionState.Disconnected ||
+                                           state == SessionState.AuthRequired ||
+                                           state == SessionState.Faulted);
+            var canEditAuthInputs = previousEnabled && !IsBusy &&
+                                    (state == SessionState.Disconnected ||
+                                     state == SessionState.AuthRequired ||
+                                     state == SessionState.Faulted ||
+                                     state == SessionState.Ready);
+
+            GUI.enabled = canEditConnectionInputs;
+            GUILayout.Label("WebSocket endpoint (editable while disconnected)");
             endpointUrl = GUILayout.TextField(
                 endpointUrl ?? string.Empty,
                 GUILayout.Width(controlWidth));
             GUI.enabled = previousEnabled;
 
-            GUI.enabled = previousEnabled && !IsBusy &&
-                          (state == SessionState.Disconnected ||
-                           state == SessionState.AuthRequired ||
-                           state == SessionState.Faulted ||
-                           state == SessionState.Ready);
-            GUILayout.Label("Access token (masked)");
+            GUI.enabled = canEditAuthInputs;
+            GUILayout.Label("Account email");
+            accountEmail = GUILayout.TextField(
+                accountEmail ?? string.Empty,
+                GUILayout.Width(controlWidth));
+            GUILayout.Label("Account password (masked)");
+            accountPassword = GUILayout.PasswordField(
+                accountPassword ?? string.Empty,
+                '*',
+                GUILayout.Width(controlWidth));
+            GUILayout.Label("Avatar UUID");
+            avatarId = GUILayout.TextField(avatarId ?? string.Empty, GUILayout.Width(controlWidth));
+            GUI.enabled = previousEnabled;
+
+            var canGetAccessToken = !IsBusy && HasTokenRefreshCredentials &&
+                                    (state == SessionState.Disconnected ||
+                                     state == SessionState.AuthRequired ||
+                                     state == SessionState.Faulted ||
+                                     state == SessionState.Ready);
+            if (DrawActionButton("Get access token", canGetAccessToken, controlWidth))
+            {
+                RefreshAccessToken();
+            }
+
+            GUILayout.Label(
+                HasTokenRefreshCredentials
+                    ? "Get access token logs in with the email/password above (or a saved refresh token) and fills Access token."
+                    : "Enter account email and password above to enable Get access token. Works in Editor and PC builds.",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
+
+            GUI.enabled = canEditAuthInputs;
+            GUILayout.Label("Access token (masked, filled by Get access token or paste)");
             accessToken = GUILayout.PasswordField(
                 accessToken ?? string.Empty,
                 '*',
                 GUILayout.Width(controlWidth));
             GUI.enabled = previousEnabled;
 
-            var canRefreshToken = !IsBusy && hasTokenRefreshCredentials &&
-                                  (state == SessionState.Disconnected ||
-                                   state == SessionState.AuthRequired ||
-                                   state == SessionState.Faulted ||
-                                   state == SessionState.Ready);
-            if (DrawActionButton("Refresh token", canRefreshToken, controlWidth))
-            {
-                RefreshAccessToken();
-            }
-
-            GUILayout.Label(
-                hasTokenRefreshCredentials
-                    ? "Refresh token uses the local UserSettings draft (refreshToken or email+password)."
-                    : "Add refreshToken or email+password to UserSettings/SynthCohostLiveTest.local.json to enable Refresh token.",
-                wrappedLabelStyle,
-                GUILayout.Width(controlWidth));
-
-            GUI.enabled = previousEnabled && !IsBusy &&
-                          (state == SessionState.Disconnected ||
-                           state == SessionState.AuthRequired ||
-                           state == SessionState.Faulted ||
-                           state == SessionState.Ready);
-            GUILayout.Label("Avatar UUID");
-            avatarId = GUILayout.TextField(avatarId ?? string.Empty, GUILayout.Width(controlWidth));
-            GUI.enabled = previousEnabled;
             GUILayout.Label(
                 $"Placeholder source: {placeholderSourceSummary}",
                 wrappedLabelStyle,
@@ -415,7 +436,7 @@ namespace SynthCohost.Runtime.Development
             if (state == SessionState.AuthRequired)
             {
                 GUILayout.Label(
-                    "Authentication was rejected. Paste a fresh token above and use Connect; Reconnect will not reuse the expired token.",
+                    "Authentication was rejected. Click Get access token for a fresh token, then Connect. Reconnect will not reuse the rejected token.",
                     wrappedLabelStyle,
                     GUILayout.Width(controlWidth));
             }
@@ -490,10 +511,10 @@ namespace SynthCohost.Runtime.Development
                 LiveTestOperationKind.RefreshToken,
                 client != null ? client.State : SessionState.Disconnected);
 
-            if (!hasTokenRefreshCredentials)
+            if (!HasTokenRefreshCredentials)
             {
                 lastOperation =
-                    "Add refreshToken or email+password to UserSettings/SynthCohostLiveTest.local.json first.";
+                    "Enter account email and password above, then click Get access token.";
                 connectionDiagnostics?.InputRejected(LiveTestInputFailure.MissingRefreshCredentials);
                 return;
             }
@@ -510,7 +531,7 @@ namespace SynthCohost.Runtime.Development
 
             var operation = BeginOperation(
                 LiveTestOperationKind.RefreshToken,
-                "Refreshing access token from the live auth API...");
+                "Getting a fresh access token from the live auth API...");
             if (operation == null)
             {
                 return;
@@ -538,11 +559,6 @@ namespace SynthCohost.Runtime.Development
                     refreshToken = result.RefreshToken;
                 }
 
-                hasTokenRefreshCredentials =
-                    !string.IsNullOrWhiteSpace(refreshToken) ||
-                    (!string.IsNullOrWhiteSpace(accountEmail) &&
-                     !string.IsNullOrWhiteSpace(accountPassword));
-
                 if (!LiveTestPlaceholderSource.TrySaveLocalDraft(
                         endpointUrl,
                         accessToken,
@@ -553,17 +569,20 @@ namespace SynthCohost.Runtime.Development
                         out var saveError))
                 {
                     lastOperation =
-                        $"Fresh access token loaded into the panel, but the local draft was not updated. {saveError}";
+                        $"Fresh access token loaded into the panel, but credentials were not saved for next launch. {saveError}";
                     connectionDiagnostics?.OperationCompleted(
                         LiveTestOperationKind.RefreshToken,
                         client != null ? client.State : SessionState.Disconnected);
                     return;
                 }
 
+                placeholderSourceSummary = Application.isEditor
+                    ? "Editor UserSettings file"
+                    : "persistent data credentials file";
                 lastOperation =
                     result.Method == LiveTestTokenRefreshMethod.RefreshToken
-                        ? $"Fresh access token loaded via refreshToken. {FormatTokenStatus(accessToken)}"
-                        : $"Fresh access token loaded via email/password login. {FormatTokenStatus(accessToken)}";
+                        ? $"Access token ready via saved refresh token. {FormatTokenStatus(accessToken)} Click Connect."
+                        : $"Access token ready via email/password login. {FormatTokenStatus(accessToken)} Click Connect.";
                 connectionDiagnostics?.OperationCompleted(
                     LiveTestOperationKind.RefreshToken,
                     client != null ? client.State : SessionState.Disconnected);
@@ -846,7 +865,7 @@ namespace SynthCohost.Runtime.Development
                 {
                     failure = LiveTestInputFailure.ExpiredToken;
                     error =
-                        $"Access token expired at {expirationUtc:HH:mm:ss} UTC. Paste a fresh token.";
+                        $"Access token expired at {expirationUtc:HH:mm:ss} UTC. Click Get access token.";
                     return false;
                 }
 
@@ -854,7 +873,7 @@ namespace SynthCohost.Runtime.Development
                 {
                     failure = LiveTestInputFailure.ExpiringSoonToken;
                     error =
-                        "Access token expires too soon for a possible backend cold start. Paste a fresh token.";
+                        "Access token expires too soon for a possible backend cold start. Click Get access token.";
                     return false;
                 }
             }
@@ -921,7 +940,7 @@ namespace SynthCohost.Runtime.Development
             {
                 lastSystemError =
                     "AUTH_FAILED: Authentication rejected. The backend message was hidden because it may contain credential details.";
-                lastOperation = "Authentication rejected. Paste a fresh access token and click Connect.";
+                lastOperation = "Authentication rejected. Click Get access token, then Connect.";
                 return;
             }
 
@@ -969,7 +988,7 @@ namespace SynthCohost.Runtime.Development
             var remaining = expirationUtc - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero)
             {
-                return $"expired at {expirationUtc:HH:mm:ss} UTC - paste a fresh token";
+                return $"expired at {expirationUtc:HH:mm:ss} UTC - click Get access token";
             }
 
             return $"expires at {expirationUtc:HH:mm:ss} UTC " +

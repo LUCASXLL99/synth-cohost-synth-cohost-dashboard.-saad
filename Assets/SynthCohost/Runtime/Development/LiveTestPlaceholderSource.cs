@@ -66,38 +66,61 @@ namespace SynthCohost.Runtime.Development
 
         internal static LiveTestPlaceholderDraft Load(string fallbackEndpoint)
         {
-            var localPath = GetDefaultLocalPath();
             string localJson = null;
             string safeNotice = string.Empty;
-            try
+            string loadedFrom = null;
+
+            foreach (var candidate in GetCandidateLocalPaths())
             {
-                if (File.Exists(localPath))
+                try
                 {
-                    var info = new FileInfo(localPath);
+                    if (!File.Exists(candidate))
+                    {
+                        continue;
+                    }
+
+                    var info = new FileInfo(candidate);
                     if (info.Length > MaximumLocalFileBytes)
                     {
-                        safeNotice = "Local placeholder file was ignored because it is too large.";
+                        safeNotice = "Local credentials file was ignored because it is too large.";
+                        continue;
                     }
-                    else
-                    {
-                        localJson = File.ReadAllText(localPath);
-                    }
+
+                    localJson = File.ReadAllText(candidate);
+                    loadedFrom = DescribePathKind(candidate);
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    // Never include Exception.Message; a path/provider exception may contain secrets.
+                    safeNotice =
+                        $"Local credentials file could not be read ({exception.GetType().Name}).";
                 }
             }
-            catch (Exception exception)
-            {
-                // Never include Exception.Message; a path/provider exception may contain secrets.
-                safeNotice =
-                    $"Local placeholder file could not be read ({exception.GetType().Name}).";
-            }
 
-            return Resolve(
+            var draft = Resolve(
                 fallbackEndpoint,
                 localJson,
                 Environment.GetEnvironmentVariable(EndpointEnvironmentVariable),
                 Environment.GetEnvironmentVariable(TokenEnvironmentVariable),
                 Environment.GetEnvironmentVariable(AvatarEnvironmentVariable),
                 safeNotice);
+
+            if (string.IsNullOrWhiteSpace(loadedFrom) ||
+                draft.SourceSummary.IndexOf("local", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return draft;
+            }
+
+            return new LiveTestPlaceholderDraft(
+                draft.EndpointUrl,
+                draft.AccessToken,
+                draft.AvatarId,
+                draft.RefreshToken,
+                draft.Email,
+                draft.Password,
+                ReplaceLocalSourceLabel(draft.SourceSummary, loadedFrom),
+                draft.SafeNotice);
         }
 
         internal static LiveTestPlaceholderDraft Resolve(
@@ -116,7 +139,7 @@ namespace SynthCohost.Runtime.Development
                 if (!trimmedJson.StartsWith("{", StringComparison.Ordinal) ||
                     !trimmedJson.EndsWith("}", StringComparison.Ordinal))
                 {
-                    safeNotice = "Local placeholder file was ignored because its JSON is invalid.";
+                    safeNotice = "Local credentials file was ignored because its JSON is invalid.";
                 }
                 else
                 {
@@ -125,13 +148,13 @@ namespace SynthCohost.Runtime.Development
                         local = JsonUtility.FromJson<LocalPlaceholderJson>(trimmedJson);
                         if (local == null)
                         {
-                            safeNotice = "Local placeholder file was ignored because its JSON is invalid.";
+                            safeNotice = "Local credentials file was ignored because its JSON is invalid.";
                         }
                     }
                     catch (Exception exception)
                     {
                         safeNotice =
-                            $"Local placeholder file was ignored ({exception.GetType().Name}).";
+                            $"Local credentials file was ignored ({exception.GetType().Name}).";
                     }
                 }
             }
@@ -145,7 +168,7 @@ namespace SynthCohost.Runtime.Development
                  HasValue(local.email) ||
                  HasValue(local.password)))
             {
-                sources.Add("local UserSettings file");
+                sources.Add("local credentials file");
             }
 
             if (HasValue(environmentEndpoint) ||
@@ -184,7 +207,7 @@ namespace SynthCohost.Runtime.Development
             safeError = string.Empty;
             try
             {
-                var path = GetDefaultLocalPath();
+                var path = GetPreferredWritablePath();
                 var directory = Path.GetDirectoryName(path);
                 if (!string.IsNullOrWhiteSpace(directory))
                 {
@@ -206,18 +229,103 @@ namespace SynthCohost.Runtime.Development
             catch (Exception exception)
             {
                 safeError =
-                    $"Local placeholder file could not be updated ({exception.GetType().Name}).";
+                    $"Local credentials file could not be updated ({exception.GetType().Name}).";
                 return false;
             }
         }
 
+        /// <summary>
+        /// Editor: project <c>UserSettings/</c>. Player: <c>Application.persistentDataPath</c>.
+        /// </summary>
+        internal static string GetPreferredWritablePath()
+        {
+            if (Application.isEditor)
+            {
+                return GetEditorUserSettingsPath();
+            }
+
+            return Path.GetFullPath(Path.Combine(Application.persistentDataPath, LocalFileName));
+        }
+
+        /// <summary>Kept for tests and guide references; editor UserSettings path.</summary>
         internal static string GetDefaultLocalPath()
+        {
+            return GetEditorUserSettingsPath();
+        }
+
+        internal static IReadOnlyList<string> GetCandidateLocalPaths()
+        {
+            var paths = new List<string>(3);
+            AddUniquePath(paths, GetEditorUserSettingsPath());
+            AddUniquePath(
+                paths,
+                Path.GetFullPath(Path.Combine(Application.persistentDataPath, LocalFileName)));
+            // Standalone builds: drop a JSON next to the .exe for first-run convenience.
+            AddUniquePath(
+                paths,
+                Path.GetFullPath(Path.Combine(Application.dataPath, "..", LocalFileName)));
+            return paths;
+        }
+
+        private static string GetEditorUserSettingsPath()
         {
             return Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
                 "UserSettings",
                 LocalFileName));
+        }
+
+        private static void AddUniquePath(List<string> paths, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            for (var i = 0; i < paths.Count; i++)
+            {
+                if (string.Equals(paths[i], path, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            paths.Add(path);
+        }
+
+        private static string DescribePathKind(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "local credentials file";
+            }
+
+            var full = Path.GetFullPath(path);
+            var userSettings = GetEditorUserSettingsPath();
+            if (string.Equals(full, userSettings, StringComparison.OrdinalIgnoreCase))
+            {
+                return "Editor UserSettings file";
+            }
+
+            var persistent = Path.GetFullPath(
+                Path.Combine(Application.persistentDataPath, LocalFileName));
+            if (string.Equals(full, persistent, StringComparison.OrdinalIgnoreCase))
+            {
+                return "persistent data credentials file";
+            }
+
+            return "build-folder credentials file";
+        }
+
+        private static string ReplaceLocalSourceLabel(string summary, string loadedFrom)
+        {
+            if (string.IsNullOrWhiteSpace(summary))
+            {
+                return loadedFrom;
+            }
+
+            return summary.Replace("local credentials file", loadedFrom);
         }
 
         private static string FirstValue(params string[] values)

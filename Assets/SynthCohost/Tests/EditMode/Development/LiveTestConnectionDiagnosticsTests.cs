@@ -24,7 +24,7 @@ namespace SynthCohost.Tests.EditMode.Development
             "Connect blocked before network use: access token is missing.")]
         [TestCase(
             (int)LiveTestInputFailure.ExpiredToken,
-            "Connect blocked before network use: access token is expired; paste a fresh token.")]
+            "Connect blocked before network use: access token is expired; click Get access token.")]
         [TestCase(
             (int)LiveTestInputFailure.ExpiringSoonToken,
             "Connect blocked before network use: access token expires too soon for a possible cold start.")]
@@ -33,7 +33,7 @@ namespace SynthCohost.Tests.EditMode.Development
             "Connect blocked before network use: avatar UUID is invalid or empty.")]
         [TestCase(
             (int)LiveTestInputFailure.MissingRefreshCredentials,
-            "Token refresh blocked: add refreshToken or email+password to the local UserSettings draft.")]
+            "Get access token blocked: enter account email and password in the panel first.")]
         public void InputRejected_LogsAnExactSafeReason(
             int failureValue,
             string expected)

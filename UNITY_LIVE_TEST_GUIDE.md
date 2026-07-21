@@ -72,15 +72,25 @@ For a persistent non-secret default, exit Play Mode, select `Assets/SynthCohost/
 
 Then enter Play Mode again and use credentials valid for that environment.
 
-## Optional local placeholders
+## Optional local placeholders / PC build login
 
-The panel can prefill values from process environment variables or from the local file `UserSettings/SynthCohostLiveTest.local.json`. Environment variables take precedence:
+In the live-test panel you can enter:
+
+1. Account email  
+2. Account password  
+3. Avatar UUID  
+4. Click **Get access token**  
+5. Click **Connect**
+
+That flow works in the **Editor** and in **PC builds**. Credentials are never stored in scenes, prefabs, or Git.
+
+The panel can also prefill values from process environment variables or a local JSON draft. Environment variables take precedence:
 
 - `SYNTH_COHOST_ENDPOINT`
 - `SYNTH_COHOST_ACCESS_TOKEN`
 - `SYNTH_COHOST_AVATAR_ID`
 
-Local-file shape:
+Local-file shape (`SynthCohostLiveTest.local.json`):
 
 ```json
 {
@@ -93,9 +103,15 @@ Local-file shape:
 }
 ```
 
-Optional `refreshToken` or `email`+`password` enable the panel **Refresh token** button. That button calls the live REST `/auth/refresh` (or `/auth/login`) route, fills the Access token field, and updates this local draft. Access tokens still expire in about 15 minutes; use Refresh token right before Connect.
+Where the file is read/written:
 
-`UserSettings/` is Git-ignored. The local file is still plaintext on this computer, so use it only for development, replace expired tokens promptly, and delete it when no longer needed.
+| Environment | Path |
+|-------------|------|
+| Unity Editor | `UserSettings/SynthCohostLiveTest.local.json` (gitignored) |
+| PC build (auto-save after Get access token) | `Application.persistentDataPath/SynthCohostLiveTest.local.json` |
+| PC build (optional drop-in) | Same folder as the `.exe`: `SynthCohostLiveTest.local.json` |
+
+**Get access token** uses `/auth/refresh` when a refresh token is saved, otherwise `/auth/login` with email/password. Access tokens still expire in about 15 minutes; click **Get access token** again before Connect when needed.
 
 Never put a token into the settings asset, a scene, a prefab, source code, `PlayerPrefs`, or Git.
 
