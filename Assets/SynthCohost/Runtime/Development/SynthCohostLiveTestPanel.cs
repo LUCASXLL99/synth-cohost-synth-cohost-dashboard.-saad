@@ -559,6 +559,14 @@ namespace SynthCohost.Runtime.Development
                     refreshToken = result.RefreshToken;
                 }
 
+                if (client != null &&
+                    !string.IsNullOrWhiteSpace(refreshToken) &&
+                    Guid.TryParse(avatarId?.Trim(), out var parsedAvatar) &&
+                    parsedAvatar != Guid.Empty)
+                {
+                    client.SetAuthSession(accessToken, refreshToken, parsedAvatar);
+                }
+
                 if (!LiveTestPlaceholderSource.TrySaveLocalDraft(
                         endpointUrl,
                         accessToken,
@@ -640,7 +648,15 @@ namespace SynthCohost.Runtime.Development
                 }
 
                 connectionDiagnostics?.RuntimeEndpointApplied();
-                client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                if (!string.IsNullOrWhiteSpace(refreshToken))
+                {
+                    client.SetAuthSession(parsedAccessToken, refreshToken, parsedAvatarId);
+                }
+                else
+                {
+                    client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                }
+
                 connectionDiagnostics?.CredentialsStaged();
                 accessToken = string.Empty;
                 lastSystemError = "(none)";
@@ -680,7 +696,8 @@ namespace SynthCohost.Runtime.Development
 
             if (client.State == SessionState.AuthRequired)
             {
-                lastOperation = "Paste a fresh token and use Connect; Reconnect will not reuse rejected credentials.";
+                lastOperation =
+                    "Authentication required. Click Get access token, then Connect. Reconnect will not reuse rejected credentials.";
                 connectionDiagnostics?.ReconnectRequiresFreshCredentials();
                 return;
             }
@@ -699,7 +716,15 @@ namespace SynthCohost.Runtime.Development
                     return;
                 }
 
-                client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                if (!string.IsNullOrWhiteSpace(refreshToken))
+                {
+                    client.SetAuthSession(parsedAccessToken, refreshToken, parsedAvatarId);
+                }
+                else
+                {
+                    client.SetRuntimeCredentials(parsedAccessToken, parsedAvatarId);
+                }
+
                 connectionDiagnostics?.CredentialsStaged();
                 accessToken = string.Empty;
                 lastSystemError = "(none)";

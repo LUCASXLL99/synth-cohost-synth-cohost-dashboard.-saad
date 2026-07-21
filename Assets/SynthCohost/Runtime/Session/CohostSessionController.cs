@@ -380,8 +380,11 @@ namespace SynthCohost.Runtime.Session
             diagnostics.Write(
                 DiagnosticLogLevel.Warning,
                 "Authentication",
-                "Backend rejected the access token or avatar ownership (AUTH_FAILED). Paste a fresh token and connect again.");
-            status.SetError("Authentication failed. Paste a fresh access token and confirm the avatar belongs to the same account.");
+                "Backend rejected the access token or avatar ownership (AUTH_FAILED). " +
+                "A refreshable auth session may recover automatically; otherwise obtain a fresh login.");
+            status.SetError(
+                "Authentication failed. If a refresh token is available the client will retry once; " +
+                "otherwise log in again and confirm the avatar belongs to the same account.");
             stateMachine.TryTransition(SessionState.AuthRequired);
             await ClearConnectionAsync(
                 true,

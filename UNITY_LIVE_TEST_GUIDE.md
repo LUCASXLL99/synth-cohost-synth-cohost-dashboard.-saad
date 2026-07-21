@@ -84,6 +84,19 @@ In the live-test panel you can enter:
 
 That flow works in the **Editor** and in **PC builds**. Credentials are never stored in scenes, prefabs, or Git.
 
+### Automatic access-token renewal (bridge `docs/auth-token-flow.md`)
+
+When Connect is used with both an access token and a refresh token (from **Get access token**), Unity:
+
+- Stores both tokens in a runtime-only auth session
+- Refreshes the access token in the background ~2 minutes before JWT expiry
+- Always replaces **both** access and refresh tokens after rotation
+- Quietly reconnects the WebSocket with the new access token (deployed v2 has no mid-session re-auth)
+- On `AUTH_FAILED` / close `4001`, attempts **one** refresh + reconnect before requiring a full login again
+- Clears tokens when refresh itself returns `401`
+
+Access tokens still last ~15 minutes; refresh tokens last ~30 days. Logout (when used) calls `POST /auth/logout` then clears local session state.
+
 The panel can also prefill values from process environment variables or a local JSON draft. Environment variables take precedence:
 
 - `SYNTH_COHOST_ENDPOINT`

@@ -1,10 +1,7 @@
 using System;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using SynthCohost.Runtime.Configuration;
-using UnityEngine;
-using UnityEngine.Networking;
+using SynthCohost.Runtime.Authentication;
 
 namespace SynthCohost.Runtime.Development
 {
@@ -49,56 +46,13 @@ namespace SynthCohost.Runtime.Development
     }
 
     /// <summary>
-    /// Development-only helper that mints a short-lived access token from the live REST auth routes.
-    /// Never logs credentials, response bodies, or exception messages.
+    /// Development helper over <see cref="AuthHttpClient"/> for the live-test panel.
     /// </summary>
     internal static class LiveTestAccessTokenRefresher
     {
-        private const int MaximumResponseBytes = 16 * 1024;
-
-        [Serializable]
-        private sealed class AuthResponseJson
-        {
-            public string access_token;
-            public string refresh_token;
-        }
-
-        [Serializable]
-        private sealed class RefreshRequestJson
-        {
-            public string refresh_token;
-        }
-
-        [Serializable]
-        private sealed class LoginRequestJson
-        {
-            public string email;
-            public string password;
-        }
-
         internal static bool TryBuildRestBaseUri(string websocketEndpoint, out Uri restBase, out string error)
         {
-            restBase = null;
-            error = string.Empty;
-            if (!SynthCohostConnectionSettings.TryParseEndpoint(
-                    websocketEndpoint,
-                    out var websocketUri,
-                    out error))
-            {
-                return false;
-            }
-
-            var builder = new UriBuilder(websocketUri)
-            {
-                Scheme = string.Equals(websocketUri.Scheme, "wss", StringComparison.OrdinalIgnoreCase)
-                    ? "https"
-                    : "http",
-                Path = string.Empty,
-                Query = string.Empty,
-                Fragment = string.Empty
-            };
-            restBase = builder.Uri;
-            return true;
+            return AuthHttpClient.TryBuildRestBaseUri(websocketEndpoint, out restBase, out error);
         }
 
         internal static async Task<LiveTestTokenRefreshResult> RefreshAsync(
@@ -108,113 +62,49 @@ namespace SynthCohost.Runtime.Development
             string password,
             CancellationToken cancellationToken)
         {
-            if (restBase == null || !restBase.IsAbsoluteUri)
-            {
-                return LiveTestTokenRefreshResult.Fail("Token refresh failed: REST base URL is invalid.");
-            }
-
             if (!string.IsNullOrWhiteSpace(refreshToken))
             {
-                var refreshed = await PostAuthAsync(
-                    new Uri(restBase, "/auth/refresh"),
-                    JsonUtility.ToJson(new RefreshRequestJson { refresh_token = refreshToken.Trim() }),
-                    LiveTestTokenRefreshMethod.RefreshToken,
+                var refreshed = await AuthHttpClient.RefreshAsync(
+                    restBase,
+                    refreshToken,
                     cancellationToken);
                 if (refreshed.Succeeded)
                 {
-                    return refreshed;
+                    return new LiveTestTokenRefreshResult(
+                        true,
+                        refreshed.Tokens.AccessToken,
+                        refreshed.Tokens.RefreshToken,
+                        LiveTestTokenRefreshMethod.RefreshToken,
+                        string.Empty);
                 }
 
-                // Fall through to email/password when refresh is rejected or unavailable.
                 if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
                 {
-                    return refreshed;
+                    return LiveTestTokenRefreshResult.Fail(refreshed.SafeError);
                 }
             }
 
             if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             {
                 return LiveTestTokenRefreshResult.Fail(
-                    "Token refresh needs refreshToken or email+password in the local UserSettings draft.");
+                    "Token refresh needs refreshToken or email+password.");
             }
 
-            return await PostAuthAsync(
-                new Uri(restBase, "/auth/login"),
-                JsonUtility.ToJson(new LoginRequestJson
-                {
-                    email = email.Trim(),
-                    password = password
-                }),
-                LiveTestTokenRefreshMethod.EmailPassword,
+            var login = await AuthHttpClient.LoginAsync(
+                restBase,
+                email,
+                password,
                 cancellationToken);
-        }
-
-        private static async Task<LiveTestTokenRefreshResult> PostAuthAsync(
-            Uri url,
-            string jsonBody,
-            LiveTestTokenRefreshMethod method,
-            CancellationToken cancellationToken)
-        {
-            using var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
-            var bodyBytes = Encoding.UTF8.GetBytes(jsonBody ?? "{}");
-            request.uploadHandler = new UploadHandlerRaw(bodyBytes);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = 60;
-
-            var operation = request.SendWebRequest();
-            while (!operation.isDone)
+            if (!login.Succeeded)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    request.Abort();
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-
-                await Task.Yield();
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (request.result != UnityWebRequest.Result.Success)
-            {
-                var status = request.responseCode;
-                return LiveTestTokenRefreshResult.Fail(
-                    status > 0
-                        ? $"Token refresh failed (HTTP {status})."
-                        : $"Token refresh failed ({request.result}).");
-            }
-
-            var raw = request.downloadHandler?.text ?? string.Empty;
-            if (raw.Length > MaximumResponseBytes)
-            {
-                return LiveTestTokenRefreshResult.Fail("Token refresh failed: response was too large.");
-            }
-
-            AuthResponseJson parsed;
-            try
-            {
-                parsed = JsonUtility.FromJson<AuthResponseJson>(raw);
-            }
-            catch (Exception exception)
-            {
-                return LiveTestTokenRefreshResult.Fail(
-                    $"Token refresh failed while parsing the response ({exception.GetType().Name}).");
-            }
-
-            if (parsed == null || string.IsNullOrWhiteSpace(parsed.access_token))
-            {
-                return LiveTestTokenRefreshResult.Fail(
-                    "Token refresh failed: access_token was missing from the response.");
+                return LiveTestTokenRefreshResult.Fail(login.SafeError);
             }
 
             return new LiveTestTokenRefreshResult(
                 true,
-                parsed.access_token.Trim(),
-                string.IsNullOrWhiteSpace(parsed.refresh_token)
-                    ? string.Empty
-                    : parsed.refresh_token.Trim(),
-                method,
+                login.Tokens.AccessToken,
+                login.Tokens.RefreshToken,
+                LiveTestTokenRefreshMethod.EmailPassword,
                 string.Empty);
         }
     }

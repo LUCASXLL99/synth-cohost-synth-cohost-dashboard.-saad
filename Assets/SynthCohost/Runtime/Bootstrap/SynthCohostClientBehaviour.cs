@@ -29,15 +29,23 @@ namespace SynthCohost.Runtime.Bootstrap
 
         [NonSerialized] private ICohostCredentialProvider credentialProvider;
         [NonSerialized] private RuntimeCredentialProvider runtimeCredentials;
+        [NonSerialized] private RuntimeAuthSession authSession;
+        [NonSerialized] private RefreshingCredentialProvider refreshingCredentials;
+        [NonSerialized] private AccessTokenRenewalService tokenRenewal;
         [NonSerialized] private CredentialProviderSlot credentialSlot;
         [NonSerialized] private CohostSessionController session;
         [NonSerialized] private ICohostDiagnostics diagnostics;
         [NonSerialized] private Uri runtimeEndpointOverride;
         [NonSerialized] private bool shuttingDown;
+        [NonSerialized] private bool authRecoveryAttempted;
+        [NonSerialized] private bool tokenRotationReconnectInFlight;
 
         public SessionState State => session?.State ?? SessionState.Disconnected;
         public ConnectionStatusViewModel Status => session?.Status;
         public ICohostOutboundSession Outbound => session;
+        public RuntimeAuthSession AuthSession => authSession;
+        public bool HasRefreshableAuthSession =>
+            authSession != null && authSession.HasRefreshToken && authSession.HasAccessCredentials;
 
         public Uri EffectiveEndpoint
         {
@@ -79,6 +87,46 @@ namespace SynthCohost.Runtime.Bootstrap
                 DiagnosticLogLevel.Information,
                 "Bootstrap",
                 "Runtime credentials were updated; token and avatar values were not logged.");
+        }
+
+        /// <summary>
+        /// Stores access + refresh tokens with the selected avatar and enables background renewal
+        /// plus refresh-before-reconnect for long live sessions.
+        /// </summary>
+        public void SetAuthSession(string accessToken, string refreshToken, Guid avatarId)
+        {
+            EnsureAuthStack();
+            authSession.SetSession(accessToken, refreshToken, avatarId);
+            credentialProvider = refreshingCredentials;
+            credentialSlot?.Set(refreshingCredentials);
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                "Auth session tokens were updated; access and refresh values were not logged.");
+        }
+
+        public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
+        {
+            EnsureAuthStack();
+            authSession.TryGetRefreshToken(out var refreshToken);
+            var restBase = TryGetRestBaseUri(out _);
+            if (restBase != null && !string.IsNullOrWhiteSpace(refreshToken))
+            {
+                await AuthHttpClient.LogoutAsync(restBase, refreshToken, cancellationToken);
+            }
+
+            await StopTokenRenewalAsync();
+            authSession.Clear();
+            if (session != null && State != SessionState.Disconnected)
+            {
+                await session.DisconnectAsync(cancellationToken);
+            }
+
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Bootstrap",
+                "Auth session cleared after logout.");
+            return true;
         }
 
         /// <summary>
@@ -133,6 +181,7 @@ namespace SynthCohost.Runtime.Bootstrap
             runtimeEndpointOverride = endpoint;
             if (session != null)
             {
+                UnbindSessionEvents(session);
                 session.Dispose();
                 session = null;
                 Compose();
@@ -159,13 +208,19 @@ namespace SynthCohost.Runtime.Bootstrap
             return session.ConnectAsync(cancellationToken);
         }
 
-        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        public async Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
             diagnostics?.Write(
                 DiagnosticLogLevel.Information,
                 "Bootstrap",
                 $"Explicit Disconnect requested in state {State}.");
-            return session == null ? Task.CompletedTask : session.DisconnectAsync(cancellationToken);
+            await StopTokenRenewalAsync();
+            if (session == null)
+            {
+                return;
+            }
+
+            await session.DisconnectAsync(cancellationToken);
         }
 
         public async Task ReconnectAsync(CancellationToken cancellationToken = default)
@@ -206,6 +261,7 @@ namespace SynthCohost.Runtime.Bootstrap
 
             Application.runInBackground = settings.RunInBackground;
             runtimeCredentials = new RuntimeCredentialProvider();
+            EnsureAuthStack();
             credentialProvider ??= runtimeCredentials;
             credentialSlot = new CredentialProviderSlot();
             credentialSlot.Set(credentialProvider);
@@ -228,7 +284,7 @@ namespace SynthCohost.Runtime.Bootstrap
                 diagnostics.Write(
                     DiagnosticLogLevel.Warning,
                     "Bootstrap",
-                    "Auto-connect is waiting for runtime credentials. Call SetCredentialProvider or SetRuntimeCredentials, then ConnectAsync.");
+                    "Auto-connect is waiting for runtime credentials. Call SetCredentialProvider, SetAuthSession, or SetRuntimeCredentials, then ConnectAsync.");
                 return;
             }
 
@@ -238,14 +294,20 @@ namespace SynthCohost.Runtime.Bootstrap
         private void OnApplicationQuit()
         {
             shuttingDown = true;
+            tokenRenewal?.Dispose();
+            tokenRenewal = null;
+            UnbindSessionEvents(session);
             session?.Dispose();
             session = null;
         }
 
         private void OnDestroy()
         {
+            tokenRenewal?.Dispose();
+            tokenRenewal = null;
             if (!shuttingDown)
             {
+                UnbindSessionEvents(session);
                 session?.Dispose();
                 session = null;
             }
@@ -255,6 +317,21 @@ namespace SynthCohost.Runtime.Bootstrap
         {
             var options = settings.CreateRuntimeOptions(runtimeEndpointOverride);
             diagnostics = new CohostDiagnostics(settings.DiagnosticLogLevel);
+            EnsureAuthStack();
+            if (tokenRenewal != null)
+            {
+                tokenRenewal.TokensRotated -= OnBackgroundTokensRotated;
+                tokenRenewal.RefreshFailedRequiresLogin -= OnBackgroundRefreshFailed;
+                tokenRenewal.Dispose();
+            }
+
+            tokenRenewal = new AccessTokenRenewalService(
+                refreshingCredentials,
+                authSession,
+                diagnostics);
+            tokenRenewal.TokensRotated += OnBackgroundTokensRotated;
+            tokenRenewal.RefreshFailedRequiresLogin += OnBackgroundRefreshFailed;
+
             var dispatcher = new MainThreadDispatcher(SynchronizationContext.Current);
             var codec = new ProtocolCodec();
             var dialect = new DeployedV2ProtocolDialect(codec);
@@ -287,12 +364,145 @@ namespace SynthCohost.Runtime.Bootstrap
                 status,
                 diagnostics,
                 dispatcher);
+            session.StateChanged += OnSessionStateChanged;
             deferredOutbound.Bind(session);
             diagnostics.Write(
                 DiagnosticLogLevel.Information,
                 "Bootstrap",
                 $"Client composed for {FormatEndpointAuthority(options.Endpoint)}; " +
                 $"diagnostics={settings.DiagnosticLogLevel}; connect timeout={options.ConnectTimeout.TotalSeconds:0}s.");
+        }
+
+        private void EnsureAuthStack()
+        {
+            authSession ??= new RuntimeAuthSession();
+            refreshingCredentials ??= new RefreshingCredentialProvider(
+                authSession,
+                () => TryGetRestBaseUri(out _));
+        }
+
+        private Uri TryGetRestBaseUri(out string error)
+        {
+            error = string.Empty;
+            var endpoint = EffectiveEndpoint?.AbsoluteUri
+                           ?? (settings != null ? settings.EndpointUrl : null);
+            if (!AuthHttpClient.TryBuildRestBaseUri(endpoint, out var restBase, out error))
+            {
+                return null;
+            }
+
+            return restBase;
+        }
+
+        private void OnSessionStateChanged(SessionState previous, SessionState next)
+        {
+            if (next == SessionState.Ready)
+            {
+                authRecoveryAttempted = false;
+                if (HasRefreshableAuthSession)
+                {
+                    tokenRenewal?.Start();
+                }
+
+                return;
+            }
+
+            if (next == SessionState.AuthRequired)
+            {
+                Observe(StopTokenRenewalAsync(), "Stopping token renewal failed.");
+                if (!tokenRotationReconnectInFlight &&
+                    !authRecoveryAttempted &&
+                    HasRefreshableAuthSession)
+                {
+                    authRecoveryAttempted = true;
+                    Observe(RecoverAuthenticationAsync(), "Auth recovery failed.");
+                }
+
+                return;
+            }
+
+            if (next == SessionState.Disconnected ||
+                next == SessionState.Faulted ||
+                next == SessionState.Stopping)
+            {
+                Observe(StopTokenRenewalAsync(), "Stopping token renewal failed.");
+            }
+        }
+
+        private async Task RecoverAuthenticationAsync()
+        {
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Auth",
+                "Attempting one access-token refresh before requiring a full login.");
+            var refreshed = await refreshingCredentials.RefreshNowAsync(CancellationToken.None);
+            if (!refreshed)
+            {
+                diagnostics?.Write(
+                    DiagnosticLogLevel.Warning,
+                    "Auth",
+                    "Access-token refresh failed; full login is required.");
+                return;
+            }
+
+            EnsureComposed();
+            await session.ConnectAsync(CancellationToken.None);
+        }
+
+        private void OnBackgroundTokensRotated()
+        {
+            if (State != SessionState.Ready || tokenRotationReconnectInFlight)
+            {
+                return;
+            }
+
+            diagnostics?.Write(
+                DiagnosticLogLevel.Information,
+                "Auth",
+                "Reconnecting WebSocket with the renewed access token.");
+            Observe(ReconnectForTokenRotationAsync(), "Token-rotation reconnect failed.");
+        }
+
+        private async Task ReconnectForTokenRotationAsync()
+        {
+            tokenRotationReconnectInFlight = true;
+            try
+            {
+                await ReconnectAsync(CancellationToken.None);
+            }
+            finally
+            {
+                tokenRotationReconnectInFlight = false;
+            }
+        }
+
+        private void OnBackgroundRefreshFailed()
+        {
+            diagnostics?.Write(
+                DiagnosticLogLevel.Warning,
+                "Auth",
+                "Background token renewal requires login again.");
+            Observe(DisconnectAsync(), "Disconnect after refresh failure failed.");
+        }
+
+        private async Task StopTokenRenewalAsync()
+        {
+            if (tokenRenewal == null)
+            {
+                return;
+            }
+
+            await tokenRenewal.StopAsync();
+        }
+
+        private void UnbindSessionEvents(CohostSessionController target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            target.StateChanged -= OnSessionStateChanged;
         }
 
         private static string FormatEndpointAuthority(Uri endpoint)

@@ -403,6 +403,18 @@ Implementation response:
 - Reject expired tokens and tokens too near expiry for a possible Render cold start before opening the socket.
 - Obtain a fresh token immediately before the remaining Unity-panel happy-path run.
 
+### 5.11 HTTP auth / refresh token flow — 2026-07-21
+
+Bridge commit `94443ea` added `docs/auth-token-flow.md` (access 15m, refresh 30d, server-side refresh rotation). Unity now implements the client checklist for the live-test / runtime path:
+
+- `AuthHttpClient` — `POST /auth/login`, `/auth/refresh`, `/auth/logout`
+- `RuntimeAuthSession` — in-memory access + refresh + avatar; both tokens replaced together on rotation
+- `RefreshingCredentialProvider` — refresh-before-handshake when JWT is inside the skew window
+- `AccessTokenRenewalService` — background renewal ~2 minutes before access expiry while Ready
+- `SynthCohostClientBehaviour.SetAuthSession` / `LogoutAsync` — quiet WS reconnect after background renewal; one automatic refresh+reconnect on `AuthRequired` / `AUTH_FAILED` before forcing a full login
+
+Production-grade encrypted-at-rest token storage remains out of scope for this milestone; runtime memory is used, with the live-test local JSON remaining a developer convenience only.
+
 ### 5.10 Final implementation decision
 
 Implement one deployed-v2 dialect now. Do not build a hybrid or Inspector toggle between current v2 and proposed 2.1. Isolate protocol/session ownership and reconnect behavior behind interfaces, while keeping avatar, AI-response, STT, and UI code independent.
