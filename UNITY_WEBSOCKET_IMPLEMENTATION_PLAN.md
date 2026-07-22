@@ -1,8 +1,11 @@
 # Synth Cohost Unity WebSocket Implementation Plan
 
-Status: **Unity deployed-v2 implementation, runtime live-test input workflow, bridge audit, and auth/UI hardening complete; a fresh-token Unity-panel happy path, Windows build, and broader backend release acceptance remain pending.**
+Status: **Deployed-v2 WebSocket client, live-test harness, and HTTP auth/refresh renewal are implemented. Product end goal: Unity is the AI co-host runtime that plugs into the Host experience and later LiveKit streaming (see root `README.md`). Avatar presentation, Host embed boundary, and LiveKit remain upcoming milestones.**
+
+> **Product context:** This plan covers the **Unity WebSocket / auth client** for the AI co-host. The three streaming UIs (Host, Broadcast Viewer, Meeting Participant) are Next.js. Unity powers the avatar and real-time co-host behaviors and is part of the same architecture, not a separate product. Full end-goal and role split: **[README.md](README.md)**.
 
 The live WebSocket and REST hosts are available. A temporary live test account and matching avatar UUID have now been created through the verified REST flow; a fresh short-lived access token must be minted immediately before each live run. The backend foundation is reported stable, but production runtime integrations, mock replacement, and final communication-protocol sign-off are still in progress.
+
 
 Implementation checkpoint (2026-07-17): the deployed-v2 protocol, Windows WebSocket transport, runtime-only credentials, session/heartbeat/reconnect orchestration, ordered routing, Unity feature adapters, Inspector settings/bootstrap, outbound rate safety, reusable live-test prefab, and dedicated live-test scene are implemented. A real live attempt proved WebSocket/TLS reachability but used an expired JWT and received `system.error/AUTH_FAILED`. Unity now leaves provisional `Ready` immediately on that error, enters `AuthRequired`, closes the rejected session, and never retries the same token. Terminal results are generation-checked under the lifecycle lock so a delayed old handler cannot reject or complete a newer session. The width-constrained panel allows the endpoint, token, and avatar UUID to be reviewed or replaced at runtime before Connect; it can prefill them from process environment variables or an explicitly user-managed, Git-ignored `UserSettings` draft without serializing them into Unity assets. It reports JWT expiry safely and applies endpoint overrides in memory without dirtying the settings asset. Every panel operation and pre-network rejection now writes a bounded on-screen activity entry and a Unity Console breadcrumb; cold-start waits add 5/30/60-second progress notices. Safe diagnostics show initialization, state transitions, endpoint authority, event names/codes, UTC times, retry timing, close-policy decisions, and exception types without logging untrusted identifiers, close reasons, endpoint credentials, tokens, avatar UUIDs, session IDs, transcript/AI text, backend raw messages, or exception messages. A fresh-token wire smoke received two `avatar.state` frames and a valid `ai.response`. Unity `6000.3.10f1` passes 169/169 EditMode tests and the 1/1 live-scene PlayMode smoke test. The bridge update through `79fbf85` introduces no approved/deployed Unity wire change. Windows build and the same fresh-token happy path through the Unity panel remain open.
 
@@ -22,15 +25,17 @@ This plan covers Unity-side work only. The ignored `synth-cohost-unity-bridge/` 
 
 ## 1. Outcome
 
-Build a modular Unity client that:
+Build a modular Unity **AI co-host** client that:
 
+- Serves as the Unity runtime for the AI avatar (behaviors today; rendering/animation/interaction systems as follow-on milestones — see root `README.md`).
+- Plugs into the Host experience (Next.js creator dashboard controls the live co-host); does not implement Host/Viewer/Participant UIs.
 - Uses a complete `ws://` or `wss://` Inspector URL as its default while allowing endpoint, token, and avatar UUID changes from the development Game-view panel before Connect.
 - Switches between local and live endpoints without code or asset mutation, assuming credentials are valid for the selected environment.
 - Uses `wss://synth-cohost-app.onrender.com/ws` for the current live integration target.
-- Has no dependency on a frontend/Vercel deployment; frontend preview and production domains are not WebSocket endpoints.
+- Has no dependency on a frontend/Vercel deployment; frontend preview and production domains are not WebSocket endpoints and must not be hardcoded.
 - Implements the deployed integer `v: 2` envelope.
 - Generates one client session ID per WebSocket connection and includes it on every frame, including auth.
-- Authenticates with a short-lived access token and one avatar UUID.
+- Authenticates with a short-lived access token and one avatar UUID; supports HTTP refresh-token renewal for long sessions.
 - Sends a heartbeat every 20 seconds.
 - Handles close codes 4000–4004 without uncontrolled reconnect loops.
 - Sends `stt.partial`, `stt.final`, and `state.ack`.
@@ -40,6 +45,7 @@ Build a modular Unity client that:
 - Keeps transport, protocol dialect, session lifecycle, routing, and Unity presentation independent and testable.
 - Can adopt proposed 2.1 later without rewriting avatar, UI, or STT feature code.
 - Never writes or logs access tokens and never serializes them into Unity assets, source, or Git. An explicitly user-created, Git-ignored local development draft may contain a short-lived token in plaintext and remains the user's responsibility.
+- Remains ready for a later LiveKit integration so the co-host participates in live broadcast/meeting sessions rather than only running as a standalone app.
 
 ## 2. Scope
 
@@ -63,16 +69,18 @@ Build a modular Unity client that:
 
 - Any backend or bridge change.
 - Dashboard/frontend labels, popups, graphics, layout, Vercel deployment, or domain configuration.
+- Implementing the Host / Broadcast Viewer / Meeting Participant Next.js UIs (frontend ownership).
 - Backend AI, authentication internals, moderation, persistence, deployment, or rate-limit implementation.
 - Proposed 2.1 wire behavior until it is approved and deployed.
 - `session.ready` and server-generated session IDs in current v2.
 - `heartbeat.ack`.
 - Real microphone speech-to-text, TTS, audio streaming, `speech.*`, lip sync, and visemes. The text-based `stt.final` protocol event remains in scope.
 - Direct OBS control, OBS credentials, RTMP/NDI output, screen/video capture, broadcast start/stop, and dashboard video delivery. The exported OBS transport is backend/sidecar code and is not exposed through the Synth Cohost WebSocket contract.
+- LiveKit integration in the **current** WebSocket milestone (planned follow-on; see root `README.md`).
 - Backend plan-tier/entitlement enforcement. The exported plan limits do not appear in any Unity-facing event.
 - Multiple concurrent `stt.final` turns.
 - Session resumption or replay after disconnect.
-- Final avatar art, animation graphs, captions UI, and audio assets that are not present yet.
+- Final avatar art, animation graphs, captions UI, and audio assets that are not present yet (next Unity milestone after networking).
 
 ## 3. Current Unity baseline
 
@@ -471,7 +479,7 @@ The export is useful corroborating evidence, not a new deployment notice: its RE
 | Bridge `79fbf85` current-v2 compatibility | Audited; existing Unity implementation matches all deployable fields, enums, limits, and event behavior. |
 | Bridge speech/media scaffolding | Not ready for Unity; mock/not wired and missing audio/viseme lifecycle details. |
 | Bridge OBS scene control | Backend/sidecar-only; no Unity event or defined Unity-to-OBS/dashboard media path. |
-| Live avatar presentation boundary | Needs confirmation before choosing Windows-only, WebGL, captured/streamed output, or another delivery path. |
+| Live avatar presentation boundary | Product direction confirmed: Unity is the AI co-host plugged into Host; LiveKit later for stream participation. Exact Host embed vs companion-client delivery still to be specified per screen. |
 | Local happy-path integration | Optional; requires the full backend workspace and local credentials. |
 | Unity-owned register/login/avatar creation | REST login/refresh/avatar routes were verified externally; implementing them inside Unity remains out of scope unless requested. |
 | Full close/error acceptance | Needs backend fixtures or manual test cases. |

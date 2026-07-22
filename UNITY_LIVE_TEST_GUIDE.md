@@ -1,5 +1,7 @@
 # Unity Live Test Guide
 
+Product context (end goal, Host/Viewer/Unity/LiveKit split): see root **[README.md](README.md)**. This guide is only for exercising the Unity WebSocket / auth client against the live backend.
+
 ## What is already configured
 
 - Test scene: `Assets/Scenes/SynthCohostLiveTest.unity`
