@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using SynthCohost.Runtime.Configuration;
 using SynthCohost.Runtime.Diagnostics;
 
 namespace SynthCohost.Runtime.Authentication
