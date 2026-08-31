@@ -3,7 +3,62 @@ guid: 0298407ecaa9ed04a8641ea7784fe99a
 ModelImporter:
   serializedVersion: 24200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Full_BodySG11
+    second: {fileID: 2100000, guid: fb755933ff9100947b033d0e51d8f8bc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Full_BodySG14
+    second: {fileID: 2100000, guid: 393c6bc74d243f94995d40c0d9a86bdc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: blinn1SG
+    second: {fileID: 2100000, guid: f6a92c8c0c04eff4baf2d0c75323d833, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert11SG
+    second: {fileID: 2100000, guid: 9efb733d845d5a24fabf661dec5bb61d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert12SG
+    second: {fileID: 2100000, guid: 02fb2b1e889cdf04cb53f32cee6a60fc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert3SG
+    second: {fileID: 2100000, guid: bc395c62bd50139489e4a9adeb185c54, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert4SG
+    second: {fileID: 2100000, guid: 5dbfe7c7840578c408da2607c802b0ec, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert6SG
+    second: {fileID: 2100000, guid: 88f8c54b02974334391c1ac7d0d480a1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert7SG
+    second: {fileID: 2100000, guid: 1b089a4724d217249a65142c5f4e937f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert8SG
+    second: {fileID: 2100000, guid: 0ca416a96c99e2e46b84a64102af3e49, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: lambert9SG
+    second: {fileID: 2100000, guid: 5f96c7858a1f6c64e8a3938092c9d36b, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0
