@@ -18,6 +18,7 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
     public Button walkButton;
     public Button runButton;
     public Button jumpButton;
+    public Toggle keepInPlaceToggle;
     public RectTransform listContent;
     public Button clipButtonTemplate;
 
@@ -51,6 +52,11 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
             jumpButton.onClick.AddListener(() => tester.PlayNamedPrefix("08_jump"));
         if (searchField != null)
             searchField.onValueChanged.AddListener(_ => ApplyFilter());
+        if (keepInPlaceToggle != null && tester != null)
+        {
+            keepInPlaceToggle.isOn = tester.keepInPlace;
+            keepInPlaceToggle.onValueChanged.AddListener(on => tester.keepInPlace = on);
+        }
     }
 
     void OnEnable()
@@ -231,8 +237,11 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
         var run = MakeButton(quick, "Run", "Run");
         var jump = MakeButton(quick, "Jump", "Jump");
 
+        var stay = MakeToggle(panel, "Stay in place (no travel)");
+        PlaceTop(stay.GetComponent<RectTransform>(), 16f, 270f, 32f);
+
         var search = MakeSearch(panel);
-        PlaceTop(search.GetComponent<RectTransform>(), 16f, 270f, 46f);
+        PlaceTop(search.GetComponent<RectTransform>(), 16f, 308f, 46f);
 
         RectTransform content;
         Button template;
@@ -241,7 +250,7 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
         scrollRt.anchorMin = Vector2.zero;
         scrollRt.anchorMax = Vector2.one;
         scrollRt.offsetMin = new Vector2(16f, 16f);
-        scrollRt.offsetMax = new Vector2(-16f, -328f);
+        scrollRt.offsetMax = new Vector2(-16f, -366f);
 
         var ui = canvasGo.AddComponent<AvatarClipTesterUI>();
         ui.tester = FindFirstObjectByType<AvatarClipTester>();
@@ -256,6 +265,7 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
         ui.walkButton = walk;
         ui.runButton = run;
         ui.jumpButton = jump;
+        ui.keepInPlaceToggle = stay;
         ui.listContent = content;
         ui.clipButtonTemplate = template;
         return ui.tester != null ? "ok" : "canvas built but tester missing";
@@ -313,6 +323,56 @@ public sealed class AvatarClipTesterUI : MonoBehaviour
         tr.offsetMin = Vector2.zero;
         tr.offsetMax = Vector2.zero;
         return go.GetComponent<Button>();
+    }
+
+    static Toggle MakeToggle(Transform parent, string label)
+    {
+        var go = new GameObject("KeepInPlace", typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+        var layout = go.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.MiddleLeft;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+        layout.childControlWidth = false;
+        layout.childControlHeight = true;
+        layout.padding = new RectOffset(4, 0, 0, 0);
+
+        var box = new GameObject("Box", typeof(RectTransform), typeof(Image), typeof(Toggle));
+        box.transform.SetParent(go.transform, false);
+        var boxLe = box.AddComponent<LayoutElement>();
+        boxLe.minWidth = 26f;
+        boxLe.preferredWidth = 26f;
+        boxLe.minHeight = 26f;
+        boxLe.preferredHeight = 26f;
+        box.GetComponent<Image>().color = new Color(0.18f, 0.22f, 0.30f, 1f);
+
+        var check = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
+        check.transform.SetParent(box.transform, false);
+        var checkRt = check.GetComponent<RectTransform>();
+        checkRt.anchorMin = new Vector2(0.15f, 0.15f);
+        checkRt.anchorMax = new Vector2(0.85f, 0.85f);
+        checkRt.offsetMin = Vector2.zero;
+        checkRt.offsetMax = Vector2.zero;
+        check.GetComponent<Image>().color = new Color(0.45f, 0.78f, 1f, 1f);
+
+        var toggle = box.GetComponent<Toggle>();
+        toggle.targetGraphic = box.GetComponent<Image>();
+        toggle.graphic = check.GetComponent<Image>();
+        toggle.isOn = true;
+
+        var textGo = new GameObject("Label", typeof(RectTransform));
+        textGo.transform.SetParent(go.transform, false);
+        var textLe = textGo.AddComponent<LayoutElement>();
+        textLe.flexibleWidth = 1f;
+        var tmp = textGo.AddComponent<TextMeshProUGUI>();
+        tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.text = label;
+        tmp.fontSize = 14;
+        tmp.color = new Color(0.82f, 0.86f, 0.92f);
+        tmp.alignment = TextAlignmentOptions.MidlineLeft;
+        tmp.raycastTarget = false;
+        return toggle;
     }
 
     static TMP_InputField MakeSearch(Transform parent)
