@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Animator))]
+[DefaultExecutionOrder(10000)]
 public sealed class AvatarClipTester : MonoBehaviour
 {
     [Tooltip("Animator state names, matching the controller.")]
@@ -17,14 +18,30 @@ public sealed class AvatarClipTester : MonoBehaviour
     [Tooltip("Play locomotion on the spot. Walk/run/climb still animate, but Root_M does not travel away.")]
     public bool keepInPlace = true;
 
+    [Tooltip("Body clips zero Maya eye bind. Keep sockets filled and irises facing the viewer.")]
+    public bool lockEyes = true;
+
+    [Tooltip("Aim irises at the main camera so a 3/4 view does not show the side of the sphere.")]
+    public bool eyesLookAtCamera = false;
+
+    [Range(0f, 90f)]
+    public float eyeLookMaxDegrees = 45f;
+
     public event Action<int> ClipChanged;
 
     Animator _animator;
     Transform _rootM;
+    Transform _eyeJointL;
+    Transform _eyeJointR;
     Vector3 _restRootLocal;
     Vector3 _restBodyPosition;
     Quaternion _restBodyRotation;
+    Vector3 _restEyePosL;
+    Vector3 _restEyePosR;
+    Quaternion _restEyeRotL;
+    Quaternion _restEyeRotR;
     bool _loopCurrent;
+    bool _lockEyes;
 
     public Animator Animator
     {
@@ -63,6 +80,19 @@ public sealed class AvatarClipTester : MonoBehaviour
             else
                 _restRootLocal = p;
         }
+
+        // v007 Maya eye bind is not identity. Body clips zero EyeJoint_L/R, which
+        // turns the corneas inside-out (one black socket, one white sphere).
+        _eyeJointL = FindChildNamed(transform, "EyeJoint_L");
+        _eyeJointR = FindChildNamed(transform, "EyeJoint_R");
+        if (_eyeJointL != null && _eyeJointR != null)
+        {
+            _restEyePosL = _eyeJointL.localPosition;
+            _restEyePosR = _eyeJointR.localPosition;
+            _restEyeRotL = _eyeJointL.localRotation;
+            _restEyeRotR = _eyeJointR.localRotation;
+            _lockEyes = true;
+        }
     }
 
     void Start()
@@ -100,19 +130,51 @@ public sealed class AvatarClipTester : MonoBehaviour
 
     void LateUpdate()
     {
-        if (!keepInPlace)
+        if (keepInPlace)
+        {
+            transform.SetPositionAndRotation(_restBodyPosition, _restBodyRotation);
+            if (_rootM != null)
+            {
+                Vector3 p = _rootM.localPosition;
+                p.x = _restRootLocal.x;
+                p.z = _restRootLocal.z;
+                if (LockVerticalTravel(CurrentStateName))
+                    p.y = _restRootLocal.y;
+                _rootM.localPosition = p;
+            }
+        }
+
+        if (!_lockEyes || !lockEyes)
             return;
 
-        transform.SetPositionAndRotation(_restBodyPosition, _restBodyRotation);
-        if (_rootM == null)
+        _eyeJointL.localPosition = _restEyePosL;
+        _eyeJointR.localPosition = _restEyePosR;
+        _eyeJointL.localRotation = _restEyeRotL;
+        _eyeJointR.localRotation = _restEyeRotR;
+
+        if (!eyesLookAtCamera)
             return;
 
-        Vector3 p = _rootM.localPosition;
-        p.x = _restRootLocal.x;
-        p.z = _restRootLocal.z;
-        if (LockVerticalTravel(CurrentStateName))
-            p.y = _restRootLocal.y;
-        _rootM.localPosition = p;
+        Camera cam = Camera.main;
+        if (cam == null)
+            return;
+
+        AimEye(_eyeJointL, cam.transform.position, eyeLookMaxDegrees);
+        AimEye(_eyeJointR, cam.transform.position, eyeLookMaxDegrees);
+    }
+
+    static void AimEye(Transform eye, Vector3 worldTarget, float maxDegrees)
+    {
+        Vector3 restFwd = eye.forward;
+        Vector3 toTarget = worldTarget - eye.position;
+        if (toTarget.sqrMagnitude < 0.0001f)
+            return;
+
+        Vector3 aimed = Vector3.RotateTowards(restFwd, toTarget.normalized, maxDegrees * Mathf.Deg2Rad, 0f);
+        Vector3 up = eye.up;
+        if (Mathf.Abs(Vector3.Dot(aimed, up)) > 0.94f)
+            up = eye.right;
+        eye.rotation = Quaternion.LookRotation(aimed, up);
     }
 
     public void PlayIndex(int index)
@@ -149,6 +211,17 @@ public sealed class AvatarClipTester : MonoBehaviour
                 return true;
         }
         return false;
+    }
+
+    static Transform FindChildNamed(Transform root, string name)
+    {
+        Transform[] all = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (all[i].name == name)
+                return all[i];
+        }
+        return null;
     }
 
     int IndexOfPrefix(string prefix)
