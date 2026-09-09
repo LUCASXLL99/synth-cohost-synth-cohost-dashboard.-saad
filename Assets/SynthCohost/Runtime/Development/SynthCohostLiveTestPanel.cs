@@ -4,6 +4,7 @@ using SynthCohost.Protocol;
 using SynthCohost.Runtime.Bootstrap;
 using SynthCohost.Runtime.Configuration;
 using SynthCohost.Runtime.Diagnostics;
+using SynthCohost.Runtime.Features.Avatar;
 using SynthCohost.Runtime.Session;
 using UnityEngine;
 
@@ -16,6 +17,14 @@ namespace SynthCohost.Runtime.Development
         internal const float ControlHorizontalReserve = 8f;
         internal const float ButtonGap = 6f;
         internal const float StackedButtonThreshold = 390f;
+        internal const float CompactPreferredWidth = 360f;
+        internal const float ShowButtonWidth = 220f;
+        internal const float ShowButtonHeight = 32f;
+
+        internal static Rect CalculateShowButtonRect()
+        {
+            return new Rect(ScreenMargin, ScreenMargin, ShowButtonWidth, ShowButtonHeight);
+        }
 
         internal static Rect CalculatePanelRect(float preferredWidth, float screenWidth, float screenHeight)
         {
@@ -66,6 +75,7 @@ namespace SynthCohost.Runtime.Development
         [SerializeField] private SynthCohostClientBehaviour client;
         [SerializeField] private SynthCohostConnectionSettings settings;
         [SerializeField] private LiveTestAvatarBehaviorAdapter avatarAdapter;
+        [SerializeField] private DashboardAvatarPresenter dashboardAvatar;
         [SerializeField] private LiveTestAiResponseAdapter aiResponseAdapter;
         [SerializeField] private LiveTestSystemErrorAdapter systemErrorAdapter;
 
@@ -97,6 +107,9 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private float contentWidth = LiveTestPanelLayout.MinimumReadableContentWidth;
         [NonSerialized] private float controlWidth =
             LiveTestPanelLayout.MinimumReadableContentWidth - LiveTestPanelLayout.ControlHorizontalReserve;
+        [NonSerialized] private bool panelHidden;
+        [NonSerialized] private bool compactPanel;
+        [NonSerialized] private bool lockEyesToggle = true;
 
         private bool IsBusy => activeOperation != null;
 
@@ -109,6 +122,7 @@ namespace SynthCohost.Runtime.Development
         {
             client ??= GetComponent<SynthCohostClientBehaviour>();
             avatarAdapter ??= GetComponent<LiveTestAvatarBehaviorAdapter>();
+            dashboardAvatar ??= FindFirstObjectByType<DashboardAvatarPresenter>();
             aiResponseAdapter ??= GetComponent<LiveTestAiResponseAdapter>();
             systemErrorAdapter ??= GetComponent<LiveTestSystemErrorAdapter>();
             transcript = string.IsNullOrWhiteSpace(defaultTranscript)
@@ -146,6 +160,11 @@ namespace SynthCohost.Runtime.Development
             }
 
             connectionDiagnostics = new LiveTestConnectionDiagnostics(this);
+            if (dashboardAvatar != null)
+            {
+                lockEyesToggle = dashboardAvatar.LockEyes;
+            }
+
             connectionDiagnostics.PanelInitialized(
                 client != null &&
                 settings != null &&
@@ -162,14 +181,22 @@ namespace SynthCohost.Runtime.Development
 
         private void OnEnable()
         {
-            if (avatarAdapter != null)
+            if (dashboardAvatar != null)
             {
-                avatarAdapter.BehaviorApplied += OnBehaviorApplied;
+                dashboardAvatar.BehaviorApplied += OnBehaviorApplied;
+                dashboardAvatar.ResponseReceived += OnAiResponseReceived;
             }
-
-            if (aiResponseAdapter != null)
+            else
             {
-                aiResponseAdapter.ResponseReceived += OnAiResponseReceived;
+                if (avatarAdapter != null)
+                {
+                    avatarAdapter.BehaviorApplied += OnBehaviorApplied;
+                }
+
+                if (aiResponseAdapter != null)
+                {
+                    aiResponseAdapter.ResponseReceived += OnAiResponseReceived;
+                }
             }
 
             if (systemErrorAdapter != null)
@@ -180,6 +207,12 @@ namespace SynthCohost.Runtime.Development
 
         private void OnDisable()
         {
+            if (dashboardAvatar != null)
+            {
+                dashboardAvatar.BehaviorApplied -= OnBehaviorApplied;
+                dashboardAvatar.ResponseReceived -= OnAiResponseReceived;
+            }
+
             if (avatarAdapter != null)
             {
                 avatarAdapter.BehaviorApplied -= OnBehaviorApplied;
@@ -236,7 +269,22 @@ namespace SynthCohost.Runtime.Development
         {
             EnsureStyles();
 
-            var panelRect = LiveTestPanelLayout.CalculatePanelRect(panelWidth, Screen.width, Screen.height);
+            if (panelHidden)
+            {
+                GUILayout.BeginArea(LiveTestPanelLayout.CalculateShowButtonRect());
+                if (GUILayout.Button("Show live-test panel", GUILayout.ExpandHeight(true)))
+                {
+                    panelHidden = false;
+                }
+
+                GUILayout.EndArea();
+                return;
+            }
+
+            var preferred = compactPanel
+                ? LiveTestPanelLayout.CompactPreferredWidth
+                : panelWidth;
+            var panelRect = LiveTestPanelLayout.CalculatePanelRect(preferred, Screen.width, Screen.height);
             contentWidth = LiveTestPanelLayout.CalculateContentWidth(panelRect.width);
             controlWidth = LiveTestPanelLayout.CalculateControlWidth(contentWidth);
             scrollPosition.x = 0f;
@@ -252,19 +300,54 @@ namespace SynthCohost.Runtime.Development
 
             GUILayout.Label("Synth Cohost v2 Live Test", titleStyle);
             GUILayout.Label(
-                "Development panel only. Inputs remain editable until Connect; credentials are never serialized into Unity assets.",
+                "Development panel only. Inputs remain editable until Connect; credentials are never serialized into Unity assets. Use Game view 16:9 so the character is visible.",
                 wrappedLabelStyle);
 
+            DrawLayoutToggles();
             DrawStatus();
             DrawCredentials();
             DrawConnectionControls();
             DrawTranscriptControls();
+            DrawPreviewControls();
             DrawResults();
             DrawActivityLog();
 
             GUILayout.EndVertical();
             GUILayout.EndScrollView();
             GUILayout.EndArea();
+        }
+
+        private void DrawLayoutToggles()
+        {
+            GUILayout.Space(4f);
+            var previous = GUI.enabled;
+            GUILayout.BeginHorizontal(GUILayout.Width(controlWidth));
+            var hideWidth = LiveTestPanelLayout.CalculateButtonWidth(controlWidth, 3);
+            if (DrawActionButton("Hide panel", true, hideWidth))
+            {
+                panelHidden = true;
+            }
+
+            GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+            compactPanel = GUILayout.Toggle(
+                compactPanel,
+                "Compact",
+                GUILayout.Width(hideWidth));
+            GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+            var eyes = GUILayout.Toggle(
+                lockEyesToggle,
+                "Lock eyes",
+                GUILayout.Width(hideWidth));
+            GUILayout.EndHorizontal();
+            GUI.enabled = previous;
+            if (eyes != lockEyesToggle)
+            {
+                lockEyesToggle = eyes;
+                if (dashboardAvatar != null)
+                {
+                    dashboardAvatar.LockEyes = lockEyesToggle;
+                }
+            }
         }
 
         private void DrawStatus()
@@ -476,11 +559,117 @@ namespace SynthCohost.Runtime.Development
                 GUILayout.Width(controlWidth));
         }
 
+        private void DrawPreviewControls()
+        {
+            GUILayout.Space(8f);
+            GUILayout.Label("Local preview (no socket, no state.ack)", sectionStyle);
+            GUILayout.Label(
+                "Use these to see thinking / smile / cheer on the character while the live AI mock is failing.",
+                wrappedLabelStyle,
+                GUILayout.Width(controlWidth));
+
+            DrawPreviewRow(AvatarBehavior.Idle, AvatarBehavior.Listening, AvatarBehavior.Thinking);
+            GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+            DrawPreviewRow(AvatarBehavior.Speaking, AvatarBehavior.Happy, AvatarBehavior.Celebrate);
+
+            if (dashboardAvatar != null && !string.IsNullOrWhiteSpace(dashboardAvatar.DebugOverlay))
+            {
+                GUILayout.Label(
+                    $"Animator: {dashboardAvatar.DebugOverlay}",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+            }
+            else if (dashboardAvatar != null && !string.IsNullOrWhiteSpace(dashboardAvatar.CurrentAnimatorStateName))
+            {
+                GUILayout.Label(
+                    $"Animator state: {dashboardAvatar.CurrentAnimatorStateName}",
+                    wrappedLabelStyle,
+                    GUILayout.Width(controlWidth));
+            }
+        }
+
+        private void DrawPreviewRow(
+            AvatarBehavior first,
+            AvatarBehavior second,
+            AvatarBehavior third)
+        {
+            var canPreview = dashboardAvatar != null && !IsBusy;
+            if (LiveTestPanelLayout.ShouldStackButtons(controlWidth))
+            {
+                if (DrawActionButton(first.ToWireValue(), canPreview, controlWidth))
+                {
+                    PreviewBehavior(first);
+                }
+
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton(second.ToWireValue(), canPreview, controlWidth))
+                {
+                    PreviewBehavior(second);
+                }
+
+                GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+                if (DrawActionButton(third.ToWireValue(), canPreview, controlWidth))
+                {
+                    PreviewBehavior(third);
+                }
+
+                return;
+            }
+
+            var buttonWidth = LiveTestPanelLayout.CalculateButtonWidth(controlWidth, 3);
+            GUILayout.BeginHorizontal(GUILayout.Width(controlWidth));
+            if (DrawActionButton(first.ToWireValue(), canPreview, buttonWidth))
+            {
+                PreviewBehavior(first);
+            }
+
+            GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+            if (DrawActionButton(second.ToWireValue(), canPreview, buttonWidth))
+            {
+                PreviewBehavior(second);
+            }
+
+            GUILayout.Space(LiveTestPanelLayout.ButtonGap);
+            if (DrawActionButton(third.ToWireValue(), canPreview, buttonWidth))
+            {
+                PreviewBehavior(third);
+            }
+
+            GUILayout.EndHorizontal();
+        }
+
+        private async void PreviewBehavior(AvatarBehavior behavior)
+        {
+            if (dashboardAvatar == null)
+            {
+                lastOperation = "Dashboard presenter is missing; cannot preview.";
+                return;
+            }
+
+            connectionDiagnostics?.PreviewRequested(behavior);
+            try
+            {
+                var applied = await dashboardAvatar.PreviewLocalAsync(behavior, CancellationToken.None);
+                lastOperation = applied
+                    ? $"Local preview applied ({behavior.ToWireValue()}); no state.ack was sent."
+                    : $"Local preview failed ({behavior.ToWireValue()}); Animator state missing.";
+                if (applied)
+                {
+                    lastAvatarBehavior = behavior.ToWireValue();
+                }
+            }
+            catch (Exception exception)
+            {
+                lastOperation = $"Local preview failed ({exception.GetType().Name}).";
+                connectionDiagnostics?.OperationFailed(LiveTestOperationKind.Preview, exception);
+            }
+        }
+
         private void DrawResults()
         {
             GUILayout.Space(8f);
             GUILayout.Label("Received", sectionStyle);
-            GUILayout.Label($"Avatar behavior (simulated adapter): {lastAvatarBehavior}", wrappedLabelStyle, GUILayout.Width(controlWidth));
+            GUILayout.Label($"Avatar behavior (dashboard presenter): {lastAvatarBehavior}", wrappedLabelStyle, GUILayout.Width(controlWidth));
             GUILayout.Label($"AI response: {lastAiResponse}", wrappedLabelStyle, GUILayout.Width(controlWidth));
             GUILayout.Label($"System error: {lastSystemError}", wrappedLabelStyle, GUILayout.Width(controlWidth));
         }

@@ -13,7 +13,8 @@ namespace SynthCohost.Runtime.Development
         Disconnect,
         SendPartial,
         SendFinal,
-        RefreshToken
+        RefreshToken,
+        Preview
     }
 
     internal enum LiveTestInputFailure
@@ -220,6 +221,13 @@ namespace SynthCohost.Runtime.Development
                 $"{GetOperationLabel(operation)} failed ({exceptionType}); exception details were hidden.");
         }
 
+        internal void PreviewRequested(AvatarBehavior behavior)
+        {
+            Write(
+                LiveTestActivitySeverity.Information,
+                $"Local preview requested; behavior={behavior.ToWireValue()}; no state.ack.");
+        }
+
         internal void SendCompleted(bool final, CohostSendResult result)
         {
             var label = final ? "Final transcript send" : "Partial transcript send";
@@ -322,6 +330,8 @@ namespace SynthCohost.Runtime.Development
                     return "Final transcript send";
                 case LiveTestOperationKind.RefreshToken:
                     return "Get access token";
+                case LiveTestOperationKind.Preview:
+                    return "Local preview";
                 default:
                     return "Operation";
             }

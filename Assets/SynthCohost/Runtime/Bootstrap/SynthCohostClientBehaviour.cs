@@ -16,6 +16,12 @@ using UnityEngine;
 
 namespace SynthCohost.Runtime.Bootstrap
 {
+    /// <summary>
+    /// Cloud WebSocket/HTTP client for the dashboard co-host.
+    /// Host (later) should call <see cref="SetAuthSession"/> or <see cref="SetRuntimeCredentials"/>,
+    /// then <see cref="ConnectAsync"/>, then optionally <see cref="SendFinalTranscriptAsync"/>.
+    /// Do not open a second socket.
+    /// </summary>
     [DisallowMultipleComponent]
     public sealed class SynthCohostClientBehaviour : MonoBehaviour
     {
@@ -340,9 +346,10 @@ namespace SynthCohost.Runtime.Bootstrap
             IAvatarBehaviorController avatar = avatarController != null
                 ? avatarController
                 : new NullAvatarBehaviorController();
-            IAiResponseSink ai = aiResponseSink != null
+            IAiResponseSink wiredAi = aiResponseSink != null
                 ? aiResponseSink
-                : new NullAiResponseSink();
+                : null;
+            IAiResponseSink ai = ComposeAiSink(wiredAi, avatar as IAiResponseSink);
             ISystemErrorSink errors = systemErrorSink != null
                 ? systemErrorSink
                 : new NullSystemErrorSink();
@@ -371,6 +378,26 @@ namespace SynthCohost.Runtime.Bootstrap
                 "Bootstrap",
                 $"Client composed for {FormatEndpointAuthority(options.Endpoint)}; " +
                 $"diagnostics={settings.DiagnosticLogLevel}; connect timeout={options.ConnectTimeout.TotalSeconds:0}s.");
+        }
+
+        private static IAiResponseSink ComposeAiSink(IAiResponseSink wired, IAiResponseSink fromAvatar)
+        {
+            if (wired == null && fromAvatar == null)
+            {
+                return new NullAiResponseSink();
+            }
+
+            if (wired == null)
+            {
+                return fromAvatar;
+            }
+
+            if (fromAvatar == null || ReferenceEquals(wired, fromAvatar))
+            {
+                return wired;
+            }
+
+            return new CompositeAiResponseSink(wired, fromAvatar);
         }
 
         private void EnsureAuthStack()
@@ -405,6 +432,12 @@ namespace SynthCohost.Runtime.Bootstrap
                 }
 
                 return;
+            }
+
+            if (next != SessionState.Ready && next != SessionState.Connecting &&
+                next != SessionState.Authenticating)
+            {
+                (avatarController as IAvatarVisualReset)?.ResetToLivingIdle();
             }
 
             if (next == SessionState.AuthRequired)

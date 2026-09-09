@@ -8,7 +8,7 @@ namespace SynthCohost.Runtime.Configuration
         menuName = "Synth Cohost/Connection Settings")]
     public sealed class SynthCohostConnectionSettings : ScriptableObject
     {
-        public const string DefaultLiveEndpoint = "wss://synth-cohost-app.onrender.com/ws";
+        public const string DefaultLiveEndpoint = "wss://synth-cohost-app-bzi4.onrender.com/ws";
 
         [Header("Connection")]
         [SerializeField] private string endpointUrl = DefaultLiveEndpoint;

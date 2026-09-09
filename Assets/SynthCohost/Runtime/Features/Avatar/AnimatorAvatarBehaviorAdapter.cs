@@ -24,27 +24,50 @@ namespace SynthCohost.Runtime.Features.Avatar
                 return Task.FromResult(false);
             }
 
-            var trigger = GetTrigger(behavior);
-            if (string.IsNullOrWhiteSpace(trigger) || !HasTrigger(animator, trigger))
+            if (!TryGetTrigger(behavior, out var trigger) ||
+                string.IsNullOrWhiteSpace(trigger) ||
+                !HasTrigger(animator, trigger))
             {
                 return Task.FromResult(false);
+            }
+
+            foreach (var parameter in animator.parameters)
+            {
+                if (parameter.type == AnimatorControllerParameterType.Trigger)
+                {
+                    animator.ResetTrigger(parameter.nameHash);
+                }
             }
 
             animator.SetTrigger(trigger);
             return Task.FromResult(true);
         }
 
-        private string GetTrigger(AvatarBehavior behavior)
+        private bool TryGetTrigger(AvatarBehavior behavior, out string trigger)
         {
             switch (behavior)
             {
-                case AvatarBehavior.Idle: return idleTrigger;
-                case AvatarBehavior.Listening: return listeningTrigger;
-                case AvatarBehavior.Thinking: return thinkingTrigger;
-                case AvatarBehavior.Speaking: return speakingTrigger;
-                case AvatarBehavior.Happy: return happyTrigger;
-                case AvatarBehavior.Celebrate: return celebrateTrigger;
-                default: throw new ArgumentOutOfRangeException(nameof(behavior), behavior, null);
+                case AvatarBehavior.Idle:
+                    trigger = idleTrigger;
+                    return true;
+                case AvatarBehavior.Listening:
+                    trigger = listeningTrigger;
+                    return true;
+                case AvatarBehavior.Thinking:
+                    trigger = thinkingTrigger;
+                    return true;
+                case AvatarBehavior.Speaking:
+                    trigger = speakingTrigger;
+                    return true;
+                case AvatarBehavior.Happy:
+                    trigger = happyTrigger;
+                    return true;
+                case AvatarBehavior.Celebrate:
+                    trigger = celebrateTrigger;
+                    return true;
+                default:
+                    trigger = null;
+                    return false;
             }
         }
 

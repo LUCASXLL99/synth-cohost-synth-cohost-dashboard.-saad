@@ -517,7 +517,7 @@ namespace SynthCohost.Tests.EditMode.Session
 
         private sealed class SessionHarness : IDisposable
         {
-            public static readonly Uri Endpoint = new Uri("wss://synth-cohost-app.onrender.com/ws");
+            public static readonly Uri Endpoint = new Uri("wss://synth-cohost-app-bzi4.onrender.com/ws");
             public const string AccessToken = "test-access-token";
 
             private SessionHarness(

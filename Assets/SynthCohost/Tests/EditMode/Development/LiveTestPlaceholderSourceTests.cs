@@ -40,14 +40,15 @@ namespace SynthCohost.Tests.EditMode.Development
             Assert.That(draft.SourceSummary, Does.Contain("local credentials file"));
         }
 
-        [TestCase("wss://synth-cohost-app.onrender.com/ws", "https://synth-cohost-app.onrender.com/")]
+        [TestCase("wss://synth-cohost-app-bzi4.onrender.com/ws", "https://synth-cohost-app-bzi4.onrender.com/")]
         [TestCase("ws://127.0.0.1:8080/ws", "http://127.0.0.1:8080/")]
         public void RestBaseUri_IsDerivedFromWebSocketEndpoint(string websocket, string expectedRest)
         {
             Assert.That(
                 LiveTestAccessTokenRefresher.TryBuildRestBaseUri(websocket, out var restBase, out var error),
                 Is.True);
-            Assert.That(error, Is.Empty);
+            Assert.That(string.IsNullOrEmpty(error), Is.True);
+            Assert.That(restBase, Is.Not.Null);
             Assert.That(restBase.AbsoluteUri, Is.EqualTo(expectedRest));
         }
 
@@ -145,7 +146,7 @@ namespace SynthCohost.Tests.EditMode.Development
             Assert.That(actual.ToUnixTimeSeconds(), Is.EqualTo(expected.ToUnixTimeSeconds()));
         }
 
-        [TestCase("wss://synth-cohost-app.onrender.com/ws", true)]
+        [TestCase("wss://synth-cohost-app-bzi4.onrender.com/ws", true)]
         [TestCase("ws://127.0.0.1:8080/ws", true)]
         [TestCase("ws://localhost:8080/ws", true)]
         [TestCase("ws://example.com/ws", false)]

@@ -31,7 +31,7 @@ Build a modular Unity **AI co-host** client that:
 - Plugs into the Host experience (Next.js creator dashboard controls the live co-host); does not implement Host/Viewer/Participant UIs.
 - Uses a complete `ws://` or `wss://` Inspector URL as its default while allowing endpoint, token, and avatar UUID changes from the development Game-view panel before Connect.
 - Switches between local and live endpoints without code or asset mutation, assuming credentials are valid for the selected environment.
-- Uses `wss://synth-cohost-app.onrender.com/ws` for the current live integration target.
+- Uses `wss://synth-cohost-app-bzi4.onrender.com/ws` for the current live integration target.
 - Has no dependency on a frontend/Vercel deployment; frontend preview and production domains are not WebSocket endpoints and must not be hardcoded.
 - Implements the deployed integer `v: 2` envelope.
 - Generates one client session ID per WebSocket connection and includes it on every frame, including auth.
@@ -104,13 +104,13 @@ This is a greenfield integration, so the module boundaries can be established cl
 Live integration:
 
 ```text
-wss://synth-cohost-app.onrender.com/ws
+wss://synth-cohost-app-bzi4.onrender.com/ws
 ```
 
 REST/auth/avatar base:
 
 ```text
-https://synth-cohost-app.onrender.com
+https://synth-cohost-app-bzi4.onrender.com
 ```
 
 Optional local development:
@@ -359,6 +359,15 @@ The backend developer confirmed:
 
 An unauthenticated connectivity probe on 2026-07-14 confirmed that the warm live WebSocket accepted a TLS/WebSocket upgrade. The REST host also responded, although its base `/` route returns 404. No token or application frame was sent, so authenticated v2 behavior still requires credentials to verify.
 
+### 5.6a Live deployment rebuild — 2026-09-07
+
+The previous Render host (`synth-cohost-app.onrender.com`) and its Unity live account no longer exist. The backend developer rebuilt the service:
+
+- Live WebSocket: `wss://synth-cohost-app-bzi4.onrender.com/ws`
+- Live REST/auth/avatar base: `https://synth-cohost-app-bzi4.onrender.com`
+- Protocol remains current v2
+- AI responses are mock until the real pipeline is wired again; connection and session flow should work
+
 ### 5.7 Client and backend integration update — 2026-07-15
 
 The client clarified:
@@ -595,7 +604,7 @@ Create a `SynthCohostConnectionSettings` ScriptableObject referenced by the boot
 
 Fields:
 
-- `Endpoint URL`, defaulting for current integration to `wss://synth-cohost-app.onrender.com/ws`; optional local value: `ws://127.0.0.1:8080/ws`.
+- `Endpoint URL`, defaulting for current integration to `wss://synth-cohost-app-bzi4.onrender.com/ws`; optional local value: `ws://127.0.0.1:8080/ws`.
 - `Auto Connect`.
 - `Connect Timeout Seconds`, default 75 seconds for Render cold starts.
 - `Auth Send Timeout Seconds`, default 5 seconds after socket open.
@@ -837,7 +846,7 @@ Exit: failures are diagnosable without exposing secrets or destabilizing Unity.
 ### Phase 10 — Live and optional local integration
 
 - [ ] Obtain a freshly minted non-committed access token immediately before Unity-panel testing; the matching avatar UUID is already available.
-- [ ] Connect to `wss://synth-cohost-app.onrender.com/ws` through the runtime Game-view endpoint field, which defaults from the settings asset.
+- [ ] Connect to `wss://synth-cohost-app-bzi4.onrender.com/ws` through the runtime Game-view endpoint field, which defaults from the settings asset.
 - [x] Confirm the latest supplied placeholder token has expired and cannot be used as evidence of a transport or backend failure.
 - [ ] After at least 15 minutes of backend inactivity, verify one real cold start can remain `Connecting`/`Waking server` for up to approximately 50 seconds without a false failure or duplicate attempt.
 - [ ] Verify auth is the first full v2 frame and includes the client session ID.

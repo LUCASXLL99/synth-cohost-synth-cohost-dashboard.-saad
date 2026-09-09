@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3b9090cca6701e488af63589ed88018, type: 3}
   m_Name: SynthCohostLiveConnectionSettings
   m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Configuration.SynthCohostConnectionSettings
-  endpointUrl: wss://synth-cohost-app.onrender.com/ws
+  endpointUrl: wss://synth-cohost-app-bzi4.onrender.com/ws
   autoConnect: 0
   runInBackground: 1
   connectTimeoutSeconds: 75

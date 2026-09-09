@@ -65,8 +65,8 @@ Host and Viewer/Participant experiences stay separate. Moderators may gain eleva
 - Dedicated live-test scene and PC build–friendly credential entry
 - Safe diagnostics (no tokens / secrets in logs)
 
-Live endpoint (configurable): `wss://synth-cohost-app.onrender.com/ws`  
-REST base: `https://synth-cohost-app.onrender.com`
+Live endpoint (configurable): `wss://synth-cohost-app-bzi4.onrender.com/ws`  
+REST base: `https://synth-cohost-app-bzi4.onrender.com`
 
 ### Next Unity milestones (planned)
 
@@ -88,7 +88,8 @@ REST base: `https://synth-cohost-app.onrender.com`
 | Path | Purpose |
 |------|---------|
 | `Assets/SynthCohost/` | Runtime client, auth, session, protocol, live-test harness |
-| `Assets/Scenes/SynthCohostLiveTest.unity` | Live backend test scene |
+| `Assets/Scenes/SynthCohostLiveTest.unity` | Live backend test scene (debug panel) |
+| `Assets/Scenes/SynthCohostDashboard.unity` | Product-shaped Standalone scene (no debug panel; repair via Tools menu) |
 | `Assets/websocket-protocol-spec.docx` | Canonical WS contract (live v2 + draft future) |
 | `synth-cohost-unity-bridge/` | **Git-ignored** backend bridge export (reference only; do not commit) |
 | `UNITY_WEBSOCKET_IMPLEMENTATION_PLAN.md` | Detailed WS implementation plan and audits |

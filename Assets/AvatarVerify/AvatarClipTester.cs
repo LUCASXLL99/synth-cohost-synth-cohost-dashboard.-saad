@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using SynthCohost.Runtime.Features.Avatar;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Animator))]
@@ -42,6 +43,7 @@ public sealed class AvatarClipTester : MonoBehaviour
     Quaternion _restEyeRotR;
     bool _loopCurrent;
     bool _lockEyes;
+    SkinnedMeshRenderer[] _faceRenderers;
 
     public Animator Animator
     {
@@ -93,6 +95,8 @@ public sealed class AvatarClipTester : MonoBehaviour
             _restEyeRotR = _eyeJointR.localRotation;
             _lockEyes = true;
         }
+
+        _faceRenderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
     }
 
     void Start()
@@ -144,23 +148,25 @@ public sealed class AvatarClipTester : MonoBehaviour
             }
         }
 
-        if (!_lockEyes || !lockEyes)
-            return;
+        if (_lockEyes && lockEyes)
+        {
+            _eyeJointL.localPosition = _restEyePosL;
+            _eyeJointR.localPosition = _restEyePosR;
+            _eyeJointL.localRotation = _restEyeRotL;
+            _eyeJointR.localRotation = _restEyeRotR;
 
-        _eyeJointL.localPosition = _restEyePosL;
-        _eyeJointR.localPosition = _restEyePosR;
-        _eyeJointL.localRotation = _restEyeRotL;
-        _eyeJointR.localRotation = _restEyeRotR;
+            if (eyesLookAtCamera)
+            {
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    AimEye(_eyeJointL, cam.transform.position, eyeLookMaxDegrees);
+                    AimEye(_eyeJointR, cam.transform.position, eyeLookMaxDegrees);
+                }
+            }
+        }
 
-        if (!eyesLookAtCamera)
-            return;
-
-        Camera cam = Camera.main;
-        if (cam == null)
-            return;
-
-        AimEye(_eyeJointL, cam.transform.position, eyeLookMaxDegrees);
-        AimEye(_eyeJointR, cam.transform.position, eyeLookMaxDegrees);
+        ApplyFaceOverlay();
     }
 
     static void AimEye(Transform eye, Vector3 worldTarget, float maxDegrees)
@@ -175,6 +181,29 @@ public sealed class AvatarClipTester : MonoBehaviour
         if (Mathf.Abs(Vector3.Dot(aimed, up)) > 0.94f)
             up = eye.right;
         eye.rotation = Quaternion.LookRotation(aimed, up);
+    }
+
+    void ApplyFaceOverlay()
+    {
+        if (_animator == null)
+        {
+            DashboardRigFaceOverlay.Clear(_faceRenderers);
+            return;
+        }
+
+        var info = _animator.GetCurrentAnimatorStateInfo(0);
+        var finished = !_loopCurrent && info.normalizedTime >= 1f;
+        DashboardRigFaceOverlay.ApplyForAnimatorState(
+            _faceRenderers,
+            CurrentStateName,
+            0f,
+            info.normalizedTime,
+            finished);
+
+        if (finished)
+        {
+            PlayNamedPrefix("01_Idle_A");
+        }
     }
 
     public void PlayIndex(int index)

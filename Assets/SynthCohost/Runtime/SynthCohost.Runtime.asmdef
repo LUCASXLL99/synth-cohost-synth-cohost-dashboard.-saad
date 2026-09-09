@@ -3,7 +3,8 @@
   "rootNamespace": "SynthCohost",
   "references": [
     "SynthCohost.Protocol",
-    "SynthCohost.Transport"
+    "SynthCohost.Transport",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

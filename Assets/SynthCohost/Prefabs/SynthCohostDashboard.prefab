@@ -1,0 +1,82 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &4048148083203929831
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5917670251268720253}
+  - component: {fileID: 6879110373077613608}
+  - component: {fileID: 4719932987303089000}
+  - component: {fileID: 891360910790849049}
+  m_Layer: 0
+  m_Name: SynthCohostDashboard
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5917670251268720253
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4048148083203929831}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6879110373077613608
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4048148083203929831}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9106594d9d4818542b3d1ea3f3839f63, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Bootstrap.SynthCohostClientBehaviour
+  settings: {fileID: 11400000, guid: 6d0b124e5874c36498778902141f98bf, type: 2}
+  avatarController: {fileID: 0}
+  aiResponseSink: {fileID: 0}
+  systemErrorSink: {fileID: 0}
+--- !u!114 &4719932987303089000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4048148083203929831}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8dd5dc54942d6d4c98098c0f2fa10af, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Bootstrap.SynthCohostRuntimeBootstrap
+  client: {fileID: 6879110373077613608}
+  settings: {fileID: 11400000, guid: 6d0b124e5874c36498778902141f98bf, type: 2}
+  connectOnStart: 1
+  persistAcrossScenes: 0
+--- !u!114 &891360910790849049
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4048148083203929831}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4d6f76d5fc7753a4f9262f2e0bd1b4e8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Bootstrap.SynthCohostSafeStatusHud
+  client: {fileID: 0}
+  bootstrap: {fileID: 0}

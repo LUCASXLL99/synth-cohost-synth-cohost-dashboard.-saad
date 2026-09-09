@@ -26,6 +26,10 @@ namespace SynthCohost.Runtime.Diagnostics
         public string LastCloseSummary { get; private set; } = string.Empty;
         public string SanitizedError { get; private set; } = string.Empty;
         public DateTimeOffset? ConnectingSince { get; private set; }
+        public int ConnectCount { get; private set; }
+        public int HeartbeatSendCount { get; private set; }
+        public int InboundCount { get; private set; }
+        public int SanitizedErrorCount { get; private set; }
 
         public bool IsWakingServer => State == SessionState.Connecting &&
                                       ConnectingSince.HasValue &&
@@ -43,6 +47,7 @@ namespace SynthCohost.Runtime.Diagnostics
 
                 if (state == SessionState.Connecting)
                 {
+                    ConnectCount++;
                     ConnectingSince = DateTimeOffset.UtcNow;
                     LastEventType = string.Empty;
                     LastInboundAtUtc = null;
@@ -91,6 +96,7 @@ namespace SynthCohost.Runtime.Diagnostics
             {
                 LastEventType = eventType ?? string.Empty;
                 LastInboundAtUtc = DateTimeOffset.UtcNow;
+                InboundCount++;
                 Changed?.Invoke();
             });
         }
@@ -101,6 +107,11 @@ namespace SynthCohost.Runtime.Diagnostics
             {
                 LastOutboundEventType = eventType ?? string.Empty;
                 LastOutboundAtUtc = DateTimeOffset.UtcNow;
+                if (string.Equals(eventType, "heartbeat", StringComparison.Ordinal))
+                {
+                    HeartbeatSendCount++;
+                }
+
                 Changed?.Invoke();
             });
         }
@@ -126,6 +137,11 @@ namespace SynthCohost.Runtime.Diagnostics
             Publish(() =>
             {
                 SanitizedError = sanitizedError ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(SanitizedError))
+                {
+                    SanitizedErrorCount++;
+                }
+
                 Changed?.Invoke();
             });
         }

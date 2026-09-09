@@ -5,7 +5,8 @@
     "SynthCohost.Protocol",
     "SynthCohost.Transport",
     "SynthCohost.Runtime",
-    "UnityEngine.TestRunner"
+    "UnityEngine.TestRunner",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

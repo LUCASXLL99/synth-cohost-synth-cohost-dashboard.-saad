@@ -5,9 +5,10 @@ Product context (end goal, Host/Viewer/Unity/LiveKit split): see root **[README.
 ## What is already configured
 
 - Test scene: `Assets/Scenes/SynthCohostLiveTest.unity`
+- Product scene (no debug panel): `Assets/Scenes/SynthCohostDashboard.unity` — create/repair via `Tools > Synth Cohost > Create or Repair Dashboard Scene`
 - Reusable prefab: `Assets/SynthCohost/Prefabs/SynthCohostLiveTest.prefab`
 - Connection settings: `Assets/SynthCohost/Configuration/SynthCohostLiveConnectionSettings.asset`
-- Live WebSocket default: `wss://synth-cohost-app.onrender.com/ws`
+- Live WebSocket default: `wss://synth-cohost-app-bzi4.onrender.com/ws`
 - Auto Connect is disabled so credentials can be entered safely after Play Mode starts.
 - Access tokens and avatar IDs are not serialized into the scene, prefab, settings, or source.
 - Endpoint, access token, and avatar UUID are editable in the Game-view test panel before **Connect**.
@@ -21,7 +22,7 @@ The live test requires both values from the same live backend account:
 1. A valid short-lived access token obtained through the backend's supported login/refresh flow.
 2. A tenant-owned avatar UUID created or returned by the backend/avatar dashboard.
 
-The live REST base is `https://synth-cohost-app.onrender.com`. The verified temporary workflow uses `POST /auth/login` with email/password and `POST /auth/refresh` when a fresh access token is needed; avatars are created through `POST /avatars`. REST credentials remain outside Unity, and the live-test panel accepts only the resulting access token and matching avatar UUID at runtime.
+The live REST base is `https://synth-cohost-app-bzi4.onrender.com`. The verified temporary workflow uses `POST /auth/login` with email/password and `POST /auth/refresh` when a fresh access token is needed; avatars are created through `POST /avatars`. REST credentials remain outside Unity, and the live-test panel accepts only the resulting access token and matching avatar UUID at runtime. Lucas rebuilt this host on 2026-09-07; the previous `synth-cohost-app.onrender.com` account no longer exists. AI replies on this host are mock for now.
 
 Do not use the development token or placeholder avatar from `test_ws.sh` against the live backend.
 
@@ -29,19 +30,20 @@ Do not use the development token or placeholder avatar from `test_ws.sh` against
 
 1. Let Unity finish compiling. Confirm there are no Console errors.
 2. In the Project window, open `Assets/Scenes/SynthCohostLiveTest.unity`.
-3. Press Play and select the Game view.
-4. Review or change **WebSocket endpoint** while the client is disconnected.
+3. Press Play and select the Game view. Prefer **16:9** so the character is not covered by the panel. Use **Hide panel** / **Compact** if needed.
+4. Under **Local preview**, click thinking / happy / celebrate to confirm the Animator without the backend. That path does not send `state.ack`.
+5. Review or change **WebSocket endpoint** while the client is disconnected.
 5. Paste the temporary access token into **Access token**. It is masked, shows a safe expiry status, and clears after transfer to the runtime-only credential provider.
 6. Paste the matching avatar UUID into **Avatar UUID**.
 7. Click **Connect** once.
 8. Watch **State**. A sleeping Render service can remain `Connecting (Waking server...)` for about 50 seconds. Do not click Connect again.
 9. Continue only when the state becomes `Ready`. In deployed v2 this initially means the socket opened and the auth frame was sent; there is no positive `session.ready` response. The panel changes to **backend activity received** after the first valid inbound event.
 10. Enter text under **Transcript**, then click **Send Final**.
-11. Expect a simulated avatar state such as `thinking`, followed by an AI response containing text, emotion, and intent. Any `system.error` is displayed in the panel.
+11. Expect inbound `avatar.state` `thinking` and a `state.ack`, then `speaking`, then `ai.response`. Unmute **Game view** audio. Console should include `Reply speech playing through avatar AudioSource`. The mouth follows the audio; it must return to idle when speech ends. Local Happy/Wink/Yawn use blendshape overlays because the FBX face joints are not skinned in Unity.
 12. Leave the connection open for more than 60 seconds to confirm 20-second heartbeats keep it alive.
 13. Click **Disconnect**, then exit Play Mode.
 
-The avatar adapter in this test scene records behavior and sends `state.ack`; it does not animate a final avatar model.
+The live-test scene drives `DashboardAvatarPresenter` on the real AvatarVerify character. Local preview does not send `state.ack`; only inbound `avatar.state` from the socket does.
 
 ## Connection and failure logs
 
@@ -69,7 +71,7 @@ Use a plain `ws://` or `wss://` endpoint with no embedded user info, query strin
 
 For a persistent non-secret default, exit Play Mode, select `Assets/SynthCohost/Configuration/SynthCohostLiveConnectionSettings.asset`, and change **Endpoint URL**:
 
-   - Live: `wss://synth-cohost-app.onrender.com/ws`
+   - Live: `wss://synth-cohost-app-bzi4.onrender.com/ws`
    - Local: `ws://127.0.0.1:8080/ws`
 
 Then enter Play Mode again and use credentials valid for that environment.
@@ -109,7 +111,7 @@ Local-file shape (`SynthCohostLiveTest.local.json`):
 
 ```json
 {
-  "endpointUrl": "wss://synth-cohost-app.onrender.com/ws",
+  "endpointUrl": "wss://synth-cohost-app-bzi4.onrender.com/ws",
   "accessToken": "paste-a-fresh-short-lived-token",
   "avatarId": "00000000-0000-0000-0000-000000000000",
   "refreshToken": "optional-long-lived-refresh-token",
@@ -137,6 +139,32 @@ If an asset/reference is accidentally removed, exit Play Mode and run:
 `Tools > Synth Cohost > Create or Repair Live Test Scene`
 
 This recreates the settings asset, prefab references, scene, and Build Settings entry. It does not create or save credentials.
+
+To create the product-shaped scene (character + client, **no** live-test panel):
+
+`Tools > Synth Cohost > Create or Repair Dashboard Scene`
+
+That scene connects from the same gitignored JSON / env vars. Host should later call `SetAuthSession` or `SetRuntimeCredentials`, then `ConnectAsync`, then optionally `SendFinalTranscriptAsync` on `SynthCohostClientBehaviour`. Do not open a second socket.
+
+## Windows Standalone smoke (operator)
+
+Build Windows 64-bit with both `SynthCohostLiveTest` and `SynthCohostDashboard` in Build Settings.
+
+Live-test build:
+
+1. Drop or keep `SynthCohostLiveTest.local.json` next to the exe or in persistent data.
+2. Launch, Get access token, Connect, Send Final, confirm thinking/`state.ack` (AI may still fail on the mock host).
+3. Use local preview buttons and Hide panel; character should change pose.
+4. Disconnect and quit.
+
+Dashboard build:
+
+1. Same credentials file.
+2. Launch: no credential IMGUI panel; safe HUD only.
+3. Confirm the character is on screen and the client reaches Ready (or a sanitized waiting message if credentials are missing).
+4. Quit cleanly.
+
+Do not put tokens in the build, Git, or PlayerPrefs.
 
 ## Useful failure meanings
 

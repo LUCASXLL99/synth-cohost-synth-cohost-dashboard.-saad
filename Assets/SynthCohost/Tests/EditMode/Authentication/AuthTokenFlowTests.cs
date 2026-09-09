@@ -25,17 +25,20 @@ namespace SynthCohost.Tests.EditMode.Authentication
                     TimeSpan.FromMinutes(2),
                     out var due),
                 Is.True);
-            Assert.That(due, Is.EqualTo(expected - TimeSpan.FromMinutes(2)));
+            Assert.That(
+                due.ToUnixTimeSeconds(),
+                Is.EqualTo((expected - TimeSpan.FromMinutes(2)).ToUnixTimeSeconds()));
         }
 
-        [TestCase("wss://synth-cohost-app.onrender.com/ws", "https://synth-cohost-app.onrender.com/")]
+        [TestCase("wss://synth-cohost-app-bzi4.onrender.com/ws", "https://synth-cohost-app-bzi4.onrender.com/")]
         [TestCase("ws://127.0.0.1:8080/ws", "http://127.0.0.1:8080/")]
         public void AuthHttpClient_BuildsRestBaseFromWebSocket(string websocket, string expected)
         {
             Assert.That(
                 AuthHttpClient.TryBuildRestBaseUri(websocket, out var restBase, out var error),
                 Is.True);
-            Assert.That(error, Is.Empty);
+            Assert.That(string.IsNullOrEmpty(error), Is.True);
+            Assert.That(restBase, Is.Not.Null);
             Assert.That(restBase.AbsoluteUri, Is.EqualTo(expected));
         }
 

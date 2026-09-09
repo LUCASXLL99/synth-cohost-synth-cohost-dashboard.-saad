@@ -6,7 +6,8 @@
     "SynthCohost.Transport",
     "SynthCohost.Runtime",
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
+    "UnityEditor.TestRunner",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [
     "Editor"

@@ -7,6 +7,28 @@ namespace SynthCohost.Tests.EditMode.Development
     public sealed class LiveTestPanelLayoutTests
     {
         [Test]
+        public void CompactPreferredWidth_FitsInsideTypicalGameView()
+        {
+            var rect = LiveTestPanelLayout.CalculatePanelRect(
+                LiveTestPanelLayout.CompactPreferredWidth,
+                1280f,
+                720f);
+
+            Assert.That(rect.width, Is.EqualTo(LiveTestPanelLayout.CompactPreferredWidth));
+            Assert.That(rect.xMax, Is.LessThanOrEqualTo(1280f - 16f));
+        }
+
+        [Test]
+        public void ShowButtonRect_StaysInTheTopLeftMargin()
+        {
+            var rect = LiveTestPanelLayout.CalculateShowButtonRect();
+
+            Assert.That(rect.xMin, Is.EqualTo(LiveTestPanelLayout.ScreenMargin));
+            Assert.That(rect.yMin, Is.EqualTo(LiveTestPanelLayout.ScreenMargin));
+            Assert.That(rect.width, Is.EqualTo(LiveTestPanelLayout.ShowButtonWidth));
+        }
+
+        [Test]
         public void PreferredPanel_FitsInsideAvailableGameView()
         {
             var rect = LiveTestPanelLayout.CalculatePanelRect(680f, 728f, 900f);
