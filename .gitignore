@@ -115,10 +115,4 @@ InitTestScene*.unity*
 /Assets/3D Models/**/*.rar
 /Assets/3D Models/**/*.rar.meta
 
-# Over GitHub 100MB limit — keep local for Unity, not in git
-/Assets/3D Models/Anim model_v008/Anim model_v008.fbx
-/Assets/3D Models/Anim model_v008/Anim model_v008.fbx.meta
-/Assets/3D Models/Avatar Model and Animations/Textures/out_fits/Jacket_normal_map.png
-/Assets/3D Models/Avatar Model and Animations/Textures/out_fits/Jacket_normal_map.png.meta
-/Assets/3D Models/Avatar Model and Animations/Textures/Shoe/normal_shoe.png
-/Assets/3D Models/Avatar Model and Animations/Textures/Shoe/normal_shoe.png.meta
+# v008 FBX (>100MB) is tracked with Git LFS; jacket/shoe normals are tracked as regular Git blobs (<100MB)
