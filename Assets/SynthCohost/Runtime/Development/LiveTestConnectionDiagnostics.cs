@@ -265,6 +265,46 @@ namespace SynthCohost.Runtime.Development
                 $"Inbound system.error handled; code={code}; backend message hidden.");
         }
 
+        internal void SpeechWaitStarted()
+        {
+            Write(
+                LiveTestActivitySeverity.Information,
+                "Waiting for backend speech.audio; local TTS is held as fallback.");
+        }
+
+        internal void SpeechAudioReceived(
+            int seq,
+            string format,
+            int byteCount,
+            int frameCount,
+            bool finalPacket)
+        {
+            var safeFormat = string.IsNullOrWhiteSpace(format) ? "unknown" : format;
+            Write(
+                LiveTestActivitySeverity.Information,
+                $"Inbound speech.audio handled; seq={seq}; format={safeFormat}; " +
+                $"bytes={Math.Max(0, byteCount)}; frames={Math.Max(0, frameCount)}; " +
+                $"final={(finalPacket ? "yes" : "no")}; audio payload hidden.");
+        }
+
+        internal void SpeechFailedReceived(string rawCode)
+        {
+            var code = string.IsNullOrWhiteSpace(rawCode)
+                ? "unspecified"
+                : ProtocolSystemErrorCodes.ToDiagnosticLabel(rawCode);
+            Write(
+                LiveTestActivitySeverity.Warning,
+                $"Inbound speech.failed handled; code={code}; using local TTS fallback.");
+        }
+
+        internal void SpeechFallback(string reason)
+        {
+            var safe = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason;
+            Write(
+                LiveTestActivitySeverity.Warning,
+                $"Backend speech fallback ({safe}); using local TTS.");
+        }
+
         private void Write(LiveTestActivitySeverity severity, string message)
         {
             var entry = new LiveTestActivityEntry(DateTimeOffset.UtcNow, severity, message);

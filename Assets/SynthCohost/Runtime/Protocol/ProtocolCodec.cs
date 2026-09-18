@@ -321,6 +321,25 @@ namespace SynthCohost.Protocol
                     }
                     return true;
 
+                case ProtocolEventTypes.SpeechAudio:
+                    if (!(payload is SpeechAudioPayload speech)) return WrongPayload(eventType, out error);
+                    if (speech.Audio == null || string.IsNullOrEmpty(speech.Audio.Data))
+                    {
+                        error = new ProtocolError(ProtocolErrorCode.InvalidPayload, "speech.audio requires inline audio data.");
+                        return false;
+                    }
+
+                    if (!speech.TryGetAudioBytes(out _))
+                    {
+                        error = new ProtocolError(ProtocolErrorCode.InvalidPayload, "speech.audio data is not valid base64.");
+                        return false;
+                    }
+
+                    return true;
+
+                case ProtocolEventTypes.SpeechFailed:
+                    return payload is SpeechFailedPayload || WrongPayload(eventType, out error);
+
                 default:
                     // Unknown events are envelope-inspectable, but this codec has no typed contract for them.
                     error = new ProtocolError(ProtocolErrorCode.InvalidEventType, $"No typed payload contract exists for '{eventType}'.");
@@ -341,6 +360,8 @@ namespace SynthCohost.Protocol
                 case ProtocolEventTypes.AvatarState: return type == typeof(AvatarStatePayload);
                 case ProtocolEventTypes.AiResponse: return type == typeof(AiResponsePayload);
                 case ProtocolEventTypes.SystemError: return type == typeof(SystemErrorPayload);
+                case ProtocolEventTypes.SpeechAudio: return type == typeof(SpeechAudioPayload);
+                case ProtocolEventTypes.SpeechFailed: return type == typeof(SpeechFailedPayload);
                 default: return false;
             }
         }

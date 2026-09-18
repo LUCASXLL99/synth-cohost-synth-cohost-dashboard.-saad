@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using SynthCohost.Protocol;
+using SynthCohost.Runtime.Authentication;
 using SynthCohost.Runtime.Bootstrap;
 using SynthCohost.Runtime.Configuration;
 using SynthCohost.Runtime.Diagnostics;
@@ -95,6 +96,7 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private string lastAvatarBehavior = "(none)";
         [NonSerialized] private string lastAiResponse = "(none)";
         [NonSerialized] private string lastSystemError = "(none)";
+        [NonSerialized] private string lastSpeechStatus = "(none)";
         [NonSerialized] private Vector2 scrollPosition;
         [NonSerialized] private CancellationTokenSource activeOperation;
         [NonSerialized] private LiveTestOperationKind? activeOperationKind;
@@ -110,6 +112,11 @@ namespace SynthCohost.Runtime.Development
         [NonSerialized] private bool panelHidden;
         [NonSerialized] private bool compactPanel;
         [NonSerialized] private bool lockEyesToggle = true;
+
+        /// <summary>
+        /// Play Mode tests set this false so scene load does not hit the live auth API.
+        /// </summary>
+        internal static bool AutoRefreshSavedTokenOnPlay = true;
 
         private bool IsBusy => activeOperation != null;
 
@@ -129,8 +136,13 @@ namespace SynthCohost.Runtime.Development
                 ? "Hello from the Unity live test."
                 : defaultTranscript;
 
-            var placeholders = LiveTestPlaceholderSource.Load(
-                settings != null ? settings.EndpointUrl : string.Empty);
+            var fallbackEndpoint = settings != null ? settings.EndpointUrl : string.Empty;
+            var placeholders = LiveTestPlaceholderSource.Load(fallbackEndpoint);
+            if (LiveTestPlaceholderSource.TryLoadLastSavedDraft(fallbackEndpoint, out var lastSaved))
+            {
+                placeholders = LiveTestPlaceholderSource.OverlayLastSaved(placeholders, lastSaved);
+            }
+
             endpointUrl = placeholders.EndpointUrl;
             accessToken = placeholders.AccessToken;
             avatarId = placeholders.AvatarId;
@@ -142,16 +154,16 @@ namespace SynthCohost.Runtime.Development
             {
                 lastOperation = placeholders.SafeNotice;
             }
-            else if (HasTokenRefreshCredentials)
-            {
-                lastOperation =
-                    "Enter or confirm account email/password, click Get access token, then Connect.";
-            }
-            else if (!string.IsNullOrWhiteSpace(accessToken) ||
+            else if (!string.IsNullOrWhiteSpace(accessToken) &&
                      !string.IsNullOrWhiteSpace(avatarId))
             {
                 lastOperation =
-                    "Review the loaded values, or enter email/password and click Get access token, then Connect.";
+                    $"Saved access token loaded. {FormatTokenStatus(accessToken)} Click Connect.";
+            }
+            else if (HasTokenRefreshCredentials)
+            {
+                lastOperation =
+                    "Saved login found. Refreshing a fresh access token...";
             }
             else
             {
@@ -185,6 +197,10 @@ namespace SynthCohost.Runtime.Development
             {
                 dashboardAvatar.BehaviorApplied += OnBehaviorApplied;
                 dashboardAvatar.ResponseReceived += OnAiResponseReceived;
+                dashboardAvatar.SpeechWaitArmed += OnSpeechWaitArmed;
+                dashboardAvatar.SpeechAudioAccepted += OnSpeechAudioAccepted;
+                dashboardAvatar.SpeechFailedNotified += OnSpeechFailedNotified;
+                dashboardAvatar.SpeechFallbackRaised += OnSpeechFallbackRaised;
             }
             else
             {
@@ -205,12 +221,25 @@ namespace SynthCohost.Runtime.Development
             }
         }
 
+        private void Start()
+        {
+            ApplySavedCredentialsToClient();
+            if (ShouldRefreshSavedTokenOnPlay())
+            {
+                RefreshAccessToken();
+            }
+        }
+
         private void OnDisable()
         {
             if (dashboardAvatar != null)
             {
                 dashboardAvatar.BehaviorApplied -= OnBehaviorApplied;
                 dashboardAvatar.ResponseReceived -= OnAiResponseReceived;
+                dashboardAvatar.SpeechWaitArmed -= OnSpeechWaitArmed;
+                dashboardAvatar.SpeechAudioAccepted -= OnSpeechAudioAccepted;
+                dashboardAvatar.SpeechFailedNotified -= OnSpeechFailedNotified;
+                dashboardAvatar.SpeechFallbackRaised -= OnSpeechFallbackRaised;
             }
 
             if (avatarAdapter != null)
@@ -671,6 +700,7 @@ namespace SynthCohost.Runtime.Development
             GUILayout.Label("Received", sectionStyle);
             GUILayout.Label($"Avatar behavior (dashboard presenter): {lastAvatarBehavior}", wrappedLabelStyle, GUILayout.Width(controlWidth));
             GUILayout.Label($"AI response: {lastAiResponse}", wrappedLabelStyle, GUILayout.Width(controlWidth));
+            GUILayout.Label($"Speech: {lastSpeechStatus}", wrappedLabelStyle, GUILayout.Width(controlWidth));
             GUILayout.Label($"System error: {lastSystemError}", wrappedLabelStyle, GUILayout.Width(controlWidth));
         }
 
@@ -692,6 +722,83 @@ namespace SynthCohost.Runtime.Development
                     wrappedLabelStyle,
                     GUILayout.Width(controlWidth));
             }
+        }
+
+        private bool ShouldRefreshSavedTokenOnPlay()
+        {
+            if (!AutoRefreshSavedTokenOnPlay ||
+                !Application.isPlaying ||
+                Application.isBatchMode ||
+                !HasTokenRefreshCredentials)
+            {
+                return false;
+            }
+
+            return !HasUsableSavedAccessToken();
+        }
+
+        private bool HasUsableSavedAccessToken()
+        {
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                return false;
+            }
+
+            if (!JwtAccessTokenInspector.TryGetExpirationUtc(accessToken, out var expirationUtc))
+            {
+                return true;
+            }
+
+            var minRemaining = (settings != null ? settings.ConnectTimeout : TimeSpan.FromSeconds(75)) +
+                               TimeSpan.FromSeconds(10);
+            return expirationUtc - DateTimeOffset.UtcNow >= minRemaining;
+        }
+
+        private void ApplySavedCredentialsToClient()
+        {
+            if (client == null ||
+                string.IsNullOrWhiteSpace(accessToken) ||
+                !Guid.TryParse(avatarId?.Trim(), out var parsedAvatar) ||
+                parsedAvatar == Guid.Empty)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(endpointUrl) &&
+                SynthCohostClientBehaviour.CanChangeRuntimeEndpoint(client.State))
+            {
+                client.TrySetRuntimeEndpoint(endpointUrl, out _);
+            }
+
+            if (!string.IsNullOrWhiteSpace(refreshToken))
+            {
+                client.SetAuthSession(accessToken, refreshToken, parsedAvatar);
+            }
+            else
+            {
+                client.SetRuntimeCredentials(accessToken, parsedAvatar);
+            }
+        }
+
+        private void PersistLocalCredentials(string tokenToSave)
+        {
+            if (!LiveTestPlaceholderSource.TrySaveLocalDraft(
+                    endpointUrl,
+                    tokenToSave ?? accessToken,
+                    avatarId,
+                    refreshToken,
+                    accountEmail,
+                    accountPassword,
+                    out var saveError))
+            {
+                lastOperation =
+                    $"Credentials are in use, but were not saved for next launch. {saveError}";
+                return;
+            }
+
+            placeholderSourceSummary = Application.isEditor
+                ? "Editor UserSettings file"
+                : "persistent data credentials file";
         }
 
         private async void RefreshAccessToken()
@@ -773,6 +880,7 @@ namespace SynthCohost.Runtime.Development
                     return;
                 }
 
+                ApplySavedCredentialsToClient();
                 placeholderSourceSummary = Application.isEditor
                     ? "Editor UserSettings file"
                     : "persistent data credentials file";
@@ -847,7 +955,8 @@ namespace SynthCohost.Runtime.Development
                 }
 
                 connectionDiagnostics?.CredentialsStaged();
-                accessToken = string.Empty;
+                PersistLocalCredentials(parsedAccessToken);
+                accessToken = parsedAccessToken;
                 lastSystemError = "(none)";
                 await client.ConnectAsync(operation.Token);
                 lastOperation = client.State == SessionState.Ready
@@ -1145,6 +1254,32 @@ namespace SynthCohost.Runtime.Development
         {
             lastAiResponse = $"[{response.Emotion.ToWireValue()} / {response.Intent.ToWireValue()}] {response.Text}";
             connectionDiagnostics?.AiResponseReceived(response.Emotion, response.Intent);
+        }
+
+        private void OnSpeechWaitArmed()
+        {
+            lastSpeechStatus = "waiting for speech.audio";
+            connectionDiagnostics?.SpeechWaitStarted();
+        }
+
+        private void OnSpeechAudioAccepted(int seq, string format, int byteCount, int frameCount, bool finalPacket)
+        {
+            lastSpeechStatus =
+                $"speech.audio seq={seq} format={format} bytes={byteCount} frames={frameCount} " +
+                $"final={(finalPacket ? "yes" : "no")}";
+            connectionDiagnostics?.SpeechAudioReceived(seq, format, byteCount, frameCount, finalPacket);
+        }
+
+        private void OnSpeechFailedNotified(string code)
+        {
+            lastSpeechStatus = "speech.failed";
+            connectionDiagnostics?.SpeechFailedReceived(code);
+        }
+
+        private void OnSpeechFallbackRaised(string reason)
+        {
+            lastSpeechStatus = $"fallback ({reason})";
+            connectionDiagnostics?.SpeechFallback(reason);
         }
 
         private void OnSystemErrorReceived(SystemErrorPayload error)

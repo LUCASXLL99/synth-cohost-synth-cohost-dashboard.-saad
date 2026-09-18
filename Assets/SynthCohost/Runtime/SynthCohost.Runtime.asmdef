@@ -1,10 +1,12 @@
 {
   "name": "SynthCohost.Runtime",
   "rootNamespace": "SynthCohost",
-  "references": [
+    "references": [
     "SynthCohost.Protocol",
     "SynthCohost.Transport",
-    "UnityEngine.UI"
+    "UnityEngine.UI",
+    "UnityEngine.UnityWebRequestModule",
+    "UnityEngine.UnityWebRequestAudioModule"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

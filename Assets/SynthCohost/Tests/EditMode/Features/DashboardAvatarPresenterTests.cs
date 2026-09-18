@@ -128,6 +128,38 @@ namespace SynthCohost.Tests.EditMode.Features
         }
 
         [Test]
+        public async Task PresentAsync_ContractBehavior_AppliesListeningWithoutTreatingAsMissing()
+        {
+            var go = new GameObject("ai-response-behavior");
+            try
+            {
+                go.AddComponent<Animator>();
+                var presenter = go.AddComponent<DashboardAvatarPresenter>();
+                var speech = new RecordingSpeechPlayback();
+                presenter.SpeechPlayback = speech;
+
+                await presenter.PresentAsync(
+                    new AiResponsePayload
+                    {
+                        Text = "Mm-hm.",
+                        Emotion = AiEmotion.Neutral,
+                        Intent = AiIntent.Chat,
+                        Behavior = AvatarBehavior.Listening
+                    },
+                    CancellationToken.None);
+
+                Assert.That(presenter.LastResponse.Behavior, Is.EqualTo(AvatarBehavior.Listening));
+                Assert.That(speech.Plays, Is.EqualTo(0));
+                Assert.That(presenter.WaitingForBackendSpeech, Is.True);
+                Assert.That(presenter.CaptionText, Does.Contain("Mm-hm."));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public async Task PresentAsync_StartsReplyHoldWithoutRequiringASession()
         {
             var go = new GameObject("reply-hold");
@@ -148,6 +180,10 @@ namespace SynthCohost.Tests.EditMode.Features
                     CancellationToken.None);
 
                 Assert.That(presenter.ReplyHoldActive, Is.True);
+                Assert.That(presenter.WaitingForBackendSpeech, Is.True);
+                Assert.That(speech.Plays, Is.EqualTo(0));
+
+                presenter.FlushBackendSpeechWaitForTests();
                 Assert.That(speech.Plays, Is.EqualTo(1));
                 Assert.That(speech.LastText, Is.EqualTo("hello there"));
 
@@ -182,7 +218,7 @@ namespace SynthCohost.Tests.EditMode.Features
                 await presenter.ApplyAsync(AvatarBehavior.Thinking, CancellationToken.None);
 
                 Assert.That(presenter.ReplyHoldActive, Is.False);
-                Assert.That(speech.Cancelled, Is.True);
+                Assert.That(presenter.WaitingForBackendSpeech, Is.False);
             }
             finally
             {
@@ -214,8 +250,142 @@ namespace SynthCohost.Tests.EditMode.Features
                 await presenter.PreviewLocalAsync(AvatarBehavior.Listening, CancellationToken.None);
 
                 Assert.That(presenter.ReplyHoldActive, Is.True);
-                Assert.That(speech.Cancelled, Is.False);
-                Assert.That(speech.IsActive, Is.True);
+                Assert.That(presenter.WaitingForBackendSpeech, Is.True);
+                Assert.That(speech.Plays, Is.EqualTo(0));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public async Task PresentSpeechAudio_StopsWaitingForLocalTts()
+        {
+            var go = new GameObject("backend-speech");
+            try
+            {
+                go.AddComponent<Animator>();
+                var presenter = go.AddComponent<DashboardAvatarPresenter>();
+                var speech = new RecordingSpeechPlayback();
+                presenter.SpeechPlayback = speech;
+                await presenter.PresentAsync(
+                    new AiResponsePayload
+                    {
+                        Text = "hello there",
+                        Emotion = AiEmotion.Neutral,
+                        Intent = AiIntent.Chat
+                    },
+                    CancellationToken.None);
+
+                await presenter.HandleAudioAsync(
+                    new SpeechAudioPayload
+                    {
+                        Seq = 0,
+                        FinalPacket = true,
+                        DurationMs = 400,
+                        SampleRate = 24000,
+                        Audio = new SpeechInlineAudio
+                        {
+                            Kind = "inline",
+                            Data = "AAAAAAAAAAAAAAAA",
+                            ContentType = "audio/pcm"
+                        },
+                        Frames = new[]
+                        {
+                            new SpeechMouthFrame { TimeMs = 0f, Openness = 0.2f },
+                            new SpeechMouthFrame { TimeMs = 80f, Openness = 0.9f }
+                        }
+                    },
+                    CancellationToken.None);
+
+                Assert.That(presenter.WaitingForBackendSpeech, Is.False);
+                Assert.That(speech.Plays, Is.EqualTo(0));
+                Assert.That(presenter.ReplyHoldActive, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public async Task PresentSpeechAudio_AfterLocalFallback_CancelsLocalPlayback()
+        {
+            var go = new GameObject("late-backend-speech");
+            try
+            {
+                go.AddComponent<Animator>();
+                var presenter = go.AddComponent<DashboardAvatarPresenter>();
+                var speech = new RecordingSpeechPlayback();
+                presenter.SpeechPlayback = speech;
+                await presenter.PresentAsync(
+                    new AiResponsePayload
+                    {
+                        Text = "hello there",
+                        Emotion = AiEmotion.Neutral,
+                        Intent = AiIntent.Chat
+                    },
+                    CancellationToken.None);
+
+                presenter.FlushBackendSpeechWaitForTests();
+                Assert.That(speech.Plays, Is.EqualTo(1));
+
+                await presenter.HandleAudioAsync(
+                    new SpeechAudioPayload
+                    {
+                        Seq = 0,
+                        FinalPacket = true,
+                        DurationMs = 400,
+                        SampleRate = 24000,
+                        Audio = new SpeechInlineAudio
+                        {
+                            Kind = "inline",
+                            Data = "AAAAAAAAAAAAAAAA",
+                            ContentType = "audio/pcm"
+                        }
+                    },
+                    CancellationToken.None);
+
+                Assert.That(speech.Cancelled, Is.True);
+                Assert.That(presenter.WaitingForBackendSpeech, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public async Task SystemError_AuthFailed_ResetsIdleAndClearsCaption()
+        {
+            var go = new GameObject("auth-failed-visual");
+            try
+            {
+                go.AddComponent<Animator>();
+                var presenter = go.AddComponent<DashboardAvatarPresenter>();
+                await presenter.PresentAsync(
+                    new AiResponsePayload
+                    {
+                        Text = "hello there",
+                        Emotion = AiEmotion.Happy,
+                        Intent = AiIntent.Chat
+                    },
+                    CancellationToken.None);
+
+                Assert.That(presenter.WaitingForBackendSpeech, Is.True);
+                await presenter.PresentAsync(
+                    new SystemErrorPayload
+                    {
+                        Code = ProtocolSystemErrorCodes.AuthFailed,
+                        Message = "nope"
+                    },
+                    CancellationToken.None);
+
+                Assert.That(presenter.WaitingForBackendSpeech, Is.False);
+                Assert.That(presenter.ReplyHoldActive, Is.False);
+                Assert.That(presenter.CaptionText, Is.Empty);
+                Assert.That(presenter.LastBehavior, Is.EqualTo(AvatarBehavior.Idle));
             }
             finally
             {
@@ -290,6 +460,12 @@ namespace SynthCohost.Tests.EditMode.Features
 
             public void Tick(AudioSource output)
             {
+            }
+
+            public bool TrySampleLipSync(AudioSource output, out LipSyncPose pose)
+            {
+                pose = default;
+                return false;
             }
 
             public void Complete()

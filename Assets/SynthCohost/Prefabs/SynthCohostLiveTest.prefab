@@ -49,7 +49,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: SynthCohost.Runtime::SynthCohost.Runtime.Bootstrap.SynthCohostClientBehaviour
   settings: {fileID: 11400000, guid: 6d0b124e5874c36498778902141f98bf, type: 2}
-  avatarController: {fileID: 210665659856195531}
+  avatarController: {fileID: 0}
   aiResponseSink: {fileID: 5690674858012848206}
   systemErrorSink: {fileID: 7308675371954048694}
 --- !u!114 &210665659856195531

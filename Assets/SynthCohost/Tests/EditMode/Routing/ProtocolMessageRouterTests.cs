@@ -5,7 +5,9 @@ using NUnit.Framework;
 using SynthCohost.Protocol;
 using SynthCohost.Runtime.Configuration;
 using SynthCohost.Runtime.Diagnostics;
+using SynthCohost.Runtime.Features.Speech;
 using SynthCohost.Runtime.Routing;
+using SynthCohost.Tests.Protocol;
 
 namespace SynthCohost.Tests.EditMode.Routing
 {
@@ -87,6 +89,53 @@ namespace SynthCohost.Tests.EditMode.Routing
         }
 
         [Test]
+        public async Task ReservedSpeechEvent_IsIgnoredWithSafeNotice()
+        {
+            var diagnostics = new RecordingDiagnostics();
+            var router = Create(diagnostics);
+            const string json = "{\"v\":2,\"type\":\"speech.viseme\",\"session_id\":\"session-a\",\"ts\":\"2026-07-14T00:00:00Z\",\"payload\":{}}";
+
+            var result = await router.RouteAsync(json, "session-a", CancellationToken.None);
+
+            Assert.That(result.Status, Is.EqualTo(ProtocolRouteStatus.IgnoredUnknown));
+            Assert.That(diagnostics.LastMessage, Does.Contain("speech.*"));
+            Assert.That(diagnostics.LastMessage, Does.Not.Contain("viseme"));
+        }
+
+        [Test]
+        public async Task SpeechAudio_IsHandled()
+        {
+            var sink = new RecordingSpeechSink();
+            var handler = new SpeechAudioMessageHandler(
+                new DeployedV2ProtocolDialect(),
+                sink);
+            var router = Create(handler);
+
+            var result = await router.RouteAsync(GoldenV2Fixtures.SpeechAudio, GoldenV2Fixtures.SessionId, CancellationToken.None);
+
+            Assert.That(result.Status, Is.EqualTo(ProtocolRouteStatus.Handled));
+            Assert.That(sink.Last, Is.Not.Null);
+            Assert.That(sink.Last.FinalPacket, Is.True);
+            Assert.That(sink.Last.Frames.Length, Is.EqualTo(4));
+        }
+
+        [Test]
+        public async Task SpeechFailed_IsHandled()
+        {
+            var sink = new RecordingSpeechSink();
+            var handler = new SpeechFailedMessageHandler(
+                new DeployedV2ProtocolDialect(),
+                sink);
+            var router = Create(handler);
+
+            var result = await router.RouteAsync(GoldenV2Fixtures.SpeechFailed, GoldenV2Fixtures.SessionId, CancellationToken.None);
+
+            Assert.That(result.Status, Is.EqualTo(ProtocolRouteStatus.Handled));
+            Assert.That(sink.Failed, Is.Not.Null);
+            Assert.That(sink.Failed.Code, Is.EqualTo("TTS_FAILED"));
+        }
+
+        [Test]
         public async Task StaleSessionNeverReachesHandler()
         {
             var handler = new CountingHandler();
@@ -128,6 +177,25 @@ namespace SynthCohost.Tests.EditMode.Routing
         {
             return "{\"v\":2,\"type\":\"ai.response\",\"session_id\":\"" + sessionId +
                    "\",\"ts\":\"2026-07-14T00:00:00Z\",\"payload\":{\"text\":\"Hello\",\"emotion\":\"happy\",\"intent\":\"chat\"}}";
+        }
+
+        private sealed class RecordingSpeechSink : ISpeechAudioSink
+        {
+            public SpeechAudioPayload Last { get; private set; }
+
+            public SpeechFailedPayload Failed { get; private set; }
+
+            public Task HandleAudioAsync(SpeechAudioPayload payload, CancellationToken cancellationToken)
+            {
+                Last = payload;
+                return Task.CompletedTask;
+            }
+
+            public Task HandleFailedAsync(SpeechFailedPayload payload, CancellationToken cancellationToken)
+            {
+                Failed = payload;
+                return Task.CompletedTask;
+            }
         }
     }
 }

@@ -28,6 +28,9 @@ public sealed class AvatarClipTester : MonoBehaviour
     [Range(0f, 90f)]
     public float eyeLookMaxDegrees = 45f;
 
+    [Tooltip("Optional baked Maya face curves. When set, expression clips drive Full_Body blendshapes.")]
+    public DashboardFaceCurveCatalog faceCurveCatalog;
+
     public event Action<int> ClipChanged;
 
     Animator _animator;
@@ -101,6 +104,7 @@ public sealed class AvatarClipTester : MonoBehaviour
 
     void Start()
     {
+        EnsureExtraPreviewStates();
         int idle = IndexOfPrefix("01_Idle_A");
         PlayIndex(idle >= 0 ? idle : 0);
     }
@@ -185,6 +189,11 @@ public sealed class AvatarClipTester : MonoBehaviour
 
     void ApplyFaceOverlay()
     {
+        if (GetComponent<DashboardAvatarPresenter>() != null)
+        {
+            return;
+        }
+
         if (_animator == null)
         {
             DashboardRigFaceOverlay.Clear(_faceRenderers);
@@ -198,7 +207,8 @@ public sealed class AvatarClipTester : MonoBehaviour
             CurrentStateName,
             0f,
             info.normalizedTime,
-            finished);
+            finished,
+            faceCurveCatalog);
 
         if (finished)
         {
@@ -287,6 +297,38 @@ public sealed class AvatarClipTester : MonoBehaviour
             || n.Contains("hang")
             || n.Contains("sleep_loop")
             || n.Contains("listening")
-            || n.Contains("breathing");
+            || n.Contains("breathing")
+            || n.Contains("relaxed_loop")
+            || n == "relaxed_loop";
+    }
+
+    /// <summary>
+    /// Appends notification / relaxed states for manual preview. Does not remove existing names.
+    /// </summary>
+    public void EnsureExtraPreviewStates()
+    {
+        var extras = new[]
+        {
+            "relaxed_enter",
+            "relaxed_loop",
+            "relaxed_exit",
+            "1_Top-Right_Notification_Standing",
+            "2_Top-Right_Notification_Sitting",
+            "3_General_Notification_Awareness_Standing",
+            "4_Windows_Notification_Bottom-Right_Standing",
+            "5_Windows_Notification_Bottom-Right_Sitting",
+            "6_General_Notification_Awareness_Sitting"
+        };
+
+        var list = stateNames == null
+            ? new System.Collections.Generic.List<string>()
+            : new System.Collections.Generic.List<string>(stateNames);
+        for (int i = 0; i < extras.Length; i++)
+        {
+            if (!list.Contains(extras[i]))
+                list.Add(extras[i]);
+        }
+
+        stateNames = list.ToArray();
     }
 }

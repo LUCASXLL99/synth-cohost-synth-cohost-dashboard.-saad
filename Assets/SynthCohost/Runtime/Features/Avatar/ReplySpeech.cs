@@ -54,5 +54,34 @@ namespace SynthCohost.Runtime.Features.Avatar
             var seconds = 0.45f + (sanitized.Length / CharactersPerSecond);
             return Mathf.Clamp(seconds, MinimumHoldSeconds, MaximumHoldSeconds);
         }
+
+        internal static string ToPowerShellSingleQuoted(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "''";
+            }
+
+            return "'" + value.Replace("'", "''") + "'";
+        }
+
+        /// <summary>
+        /// Mouth drive while a reply is held. Uses real playback when audible; otherwise a
+        /// short talk envelope so mute/late TTS still moves the jaw until the hold ends.
+        /// </summary>
+        internal static float TalkPeak(float measuredPeak, bool replyHoldActive, float unscaledTime)
+        {
+            if (measuredPeak > 0.02f)
+            {
+                return measuredPeak;
+            }
+
+            if (!replyHoldActive)
+            {
+                return 0f;
+            }
+
+            return 0.55f + 0.4f * (0.5f + 0.5f * Mathf.Sin(unscaledTime * 9f));
+        }
     }
 }

@@ -123,6 +123,81 @@ namespace SynthCohost.Runtime.Development
                 draft.SafeNotice);
         }
 
+        /// <summary>
+        /// Last Get-access-token / Connect save. Wins over process environment so Play
+        /// reuses the token the operator just obtained.
+        /// </summary>
+        internal static bool TryLoadLastSavedDraft(string fallbackEndpoint, out LiveTestPlaceholderDraft draft)
+        {
+            return TryLoadDraftFromPath(GetPreferredWritablePath(), fallbackEndpoint, out draft);
+        }
+
+        internal static bool TryLoadDraftFromPath(
+            string path,
+            string fallbackEndpoint,
+            out LiveTestPlaceholderDraft draft)
+        {
+            draft = default;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Length > MaximumLocalFileBytes)
+                {
+                    return false;
+                }
+
+                var loaded = Resolve(
+                    fallbackEndpoint,
+                    File.ReadAllText(path),
+                    null,
+                    null,
+                    null);
+                if (!HasValue(loaded.AccessToken) &&
+                    !HasValue(loaded.RefreshToken) &&
+                    !HasValue(loaded.Email))
+                {
+                    return false;
+                }
+
+                draft = new LiveTestPlaceholderDraft(
+                    loaded.EndpointUrl,
+                    loaded.AccessToken,
+                    loaded.AvatarId,
+                    loaded.RefreshToken,
+                    loaded.Email,
+                    loaded.Password,
+                    DescribePathKind(path),
+                    loaded.SafeNotice);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        internal static LiveTestPlaceholderDraft OverlayLastSaved(
+            LiveTestPlaceholderDraft loaded,
+            LiveTestPlaceholderDraft lastSaved)
+        {
+            return new LiveTestPlaceholderDraft(
+                FirstValue(lastSaved.EndpointUrl, loaded.EndpointUrl),
+                FirstValue(lastSaved.AccessToken, loaded.AccessToken),
+                FirstValue(lastSaved.AvatarId, loaded.AvatarId),
+                FirstValue(lastSaved.RefreshToken, loaded.RefreshToken),
+                FirstValue(lastSaved.Email, loaded.Email),
+                FirstValue(lastSaved.Password, loaded.Password),
+                string.IsNullOrWhiteSpace(lastSaved.SourceSummary)
+                    ? loaded.SourceSummary
+                    : lastSaved.SourceSummary,
+                loaded.SafeNotice);
+        }
+
         internal static LiveTestPlaceholderDraft Resolve(
             string fallbackEndpoint,
             string localJson,

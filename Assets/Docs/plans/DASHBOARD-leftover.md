@@ -23,8 +23,8 @@ Status baseline: deployed v2 client, HTTP auth/refresh, live-test harness. The S
 | Host embed / delivery method | **Blocked** on product decision | D2 |
 | Dashboard config apply | **Blocked** on schema | D3 |
 | LiveKit | **Blocked** on contract | D4 |
-| Conversational presence (letter) | Direction only | D5 |
-| Draft 2.1 / `speech.*` / OBS | Out of scope until backend ships | D6 |
+| Conversational presence (letter) | Local idle / listening / thinking loops in presenter | D5 |
+| Draft 2.1 / viseme IDs / OBS | Out of scope until backend ships | D6 |
 
 ---
 
@@ -32,7 +32,7 @@ Status baseline: deployed v2 client, HTTP auth/refresh, live-test harness. The S
 
 Attach new work to these — do not duplicate them:
 
-- `SynthCohostClientBehaviour` Compose: router → `AvatarStateMessageHandler` / `AiResponseMessageHandler` / `SystemErrorMessageHandler`
+- `SynthCohostClientBehaviour` Compose: router → `AvatarStateMessageHandler` / `AiResponseMessageHandler` / `SystemErrorMessageHandler` / `SpeechAudioMessageHandler` / `SpeechFailedMessageHandler`
 - Inspector slots: `avatarController`, `aiResponseSink`, `systemErrorSink` (null objects send **no** `state.ack` / drop events)
 - `AnimatorAvatarBehaviorAdapter` — six behavior **triggers**; false if Animator/trigger missing
 - `ICohostOutboundSession` STT + `state.ack`; `FinalTurnGate`
@@ -65,11 +65,12 @@ REST: `https://synth-cohost-app-bzi4.onrender.com`
 - [x] False apply → no ack; unknown enum does not throw
 - [x] Leave-Ready visual reset without ack
 - [x] Tests + `Tools > Synth Cohost > Install Dashboard Avatar In Live Test Scene`
+- [x] Backend `speech.audio` playback + `mouth_open_M` from mouth-openness frames; local SAPI fallback
+- [x] Speaking body uses the idle breathing clip (`01_Idle_A_(Breathing)`); mouth is blendshapes + audio
 
 **Still later**
 
-- Dedicated speaking clip (speaking body now uses `34_Curious_Lean`; mouth is blendshapes + TTS audio)
-- Backend `speech.*` visemes (local jaw/mouth stand-in + Windows SAPI TTS of `ai.response` until that contract ships)
+- Phoneme/viseme IDs (`speech.viseme`) if backend ever sends them — not required for current `frames[].o`
 - Host injects credentials (D2); dashboard scene currently uses env / gitignored JSON
 
 **Unblocked Unity work now in tree**
@@ -77,7 +78,8 @@ REST: `https://synth-cohost-app-bzi4.onrender.com`
 - Live-test **local preview** of the six behaviors (no `state.ack`)
 - Hide / compact panel and lock-eyes toggle
 - uGUI captions + optional blendshape emotion mapping
-- Local Windows TTS of `ai.response`, then living idle (no `state.ack`)
+- Backend `speech.audio` (Deepgram) when live; local Windows TTS of `ai.response` only as fallback
+- Live-test panel activity for wait / `speech.audio` / `speech.failed` / fallback (no audio bytes)
 - Product scene `Assets/Scenes/SynthCohostDashboard.unity` (menu: `Tools > Synth Cohost > Create or Repair Dashboard Scene`)
 - Host API on `SynthCohostClientBehaviour`: `SetAuthSession` / `SetRuntimeCredentials` / `ConnectAsync` / `SendFinalTranscriptAsync` / `DisconnectAsync`
 
@@ -118,9 +120,8 @@ Until they answer, **do not** start a WebGL transport or production embed scene.
 
 **Attach:** local animation layers while wire behavior is `listening` / `thinking` / `speaking`. No new protocol types.
 
-- [ ] Listening / acknowledging / thinking / speaking / reacting blends
-- [ ] Visual reaction while user is still speaking (and during possible backchannels)
-- [ ] Timing owned in Unity
+- [ ] Listening / acknowledging / thinking / speaking / reacting blends (beyond current idle / listening / thinking loops)
+- [x] Timing owned in Unity for idle / listening / thinking loops
 
 ### B6. Computer vision overlay — owner unnamed
 
@@ -159,7 +160,7 @@ Lucas rebuilt the live host on 2026-09-07 (`synth-cohost-app-bzi4.onrender.com`)
 
 - Draft 2.1 (`protocol_version`, `session.ready`, server session id)
 - `heartbeat.ack` as required
-- Production `speech.*` / mic STT / visemes (local Windows TTS of `ai.response` is a stand-in until that contract ships)
+- Phoneme viseme IDs (`speech.start` / `speech.viseme` / `speech.end`) until backend sends them — `speech.audio` mouth openness is already wired
 - OBS / RTMP / NDI from Unity
 - Concurrent `stt.final` turns
 - Session resumption / replay
@@ -177,10 +178,10 @@ Full table: requirements §11. Minimum adapter/PlayMode coverage:
 - [x] `ai.response` with empty text does not throw
 - [x] Preview apply does not send `state.ack` (local presenter only)
 - [ ] Missing trigger → no ack, previous visual kept (this rig uses states, not triggers)
-- [ ] Stale session frame never reaches Animator
+- [x] Stale session frame never reaches Animator
 - [ ] Reconnect does not replay STT or re-ack old behavior
-- [ ] Unknown inbound type ignored (including `speech.*`) — already in client; keep coverage
-- [ ] Gate rejects second final; character stays on current thinking/speaking
+- [x] Unknown inbound type ignored (reserved `speech.start` / `speech.viseme` / `speech.end` / `speech.chunk`; `speech.audio` is handled)
+- [x] Gate rejects second final; character stays on current thinking/speaking
 - [x] Dispose/stop does not throw after destroying the live-test client object
 
 ---

@@ -55,7 +55,7 @@ namespace SynthCohost.Tests.EditMode.Development
 
             var clientObject = new SerializedObject(client);
             Assert.That(clientObject.FindProperty("settings").objectReferenceValue, Is.SameAs(settings));
-            Assert.That(clientObject.FindProperty("avatarController").objectReferenceValue, Is.SameAs(avatar));
+            Assert.That(clientObject.FindProperty("avatarController").objectReferenceValue, Is.Null);
             Assert.That(clientObject.FindProperty("aiResponseSink").objectReferenceValue, Is.SameAs(ai));
             Assert.That(clientObject.FindProperty("systemErrorSink").objectReferenceValue, Is.SameAs(errors));
 

@@ -13,6 +13,18 @@ namespace SynthCohost.Tests.PlayMode
 {
     public sealed class LiveTestSceneSmokeTests
     {
+        [SetUp]
+        public void DisableLiveTokenRefreshDuringSmokeTests()
+        {
+            SynthCohostLiveTestPanel.AutoRefreshSavedTokenOnPlay = false;
+        }
+
+        [TearDown]
+        public void RestoreLiveTokenRefresh()
+        {
+            SynthCohostLiveTestPanel.AutoRefreshSavedTokenOnPlay = true;
+        }
+
         [UnityTest]
         public IEnumerator LiveTestScene_LoadsConfiguredAndWaitsForRuntimeCredentials()
         {

@@ -10447,12 +10447,22 @@ MonoBehaviour:
   - sleepy
   - Slow_Blink
   - Wink
+  - relaxed_enter
+  - relaxed_loop
+  - relaxed_exit
+  - 1_Top-Right_Notification_Standing
+  - 2_Top-Right_Notification_Sitting
+  - 3_General_Notification_Awareness_Standing
+  - 4_Windows_Notification_Bottom-Right_Standing
+  - 5_Windows_Notification_Bottom-Right_Sitting
+  - 6_General_Notification_Awareness_Sitting
   currentIndex: 0
   expectedBrokenStateNames: []
   keepInPlace: 1
   lockEyes: 1
   eyesLookAtCamera: 1
   eyeLookMaxDegrees: 45
+  faceCurveCatalog: {fileID: 11400000, guid: 39af5be72c2b1aa49a02fa52ed5f0045, type: 2}
 --- !u!95 &1397931449
 Animator:
   serializedVersion: 7
@@ -32083,12 +32093,22 @@ MonoBehaviour:
   - sleepy
   - Slow_Blink
   - Wink
+  - relaxed_enter
+  - relaxed_loop
+  - relaxed_exit
+  - 1_Top-Right_Notification_Standing
+  - 2_Top-Right_Notification_Sitting
+  - 3_General_Notification_Awareness_Standing
+  - 4_Windows_Notification_Bottom-Right_Standing
+  - 5_Windows_Notification_Bottom-Right_Sitting
+  - 6_General_Notification_Awareness_Sitting
   currentIndex: 0
   expectedBrokenStateNames: []
   keepInPlace: 1
   lockEyes: 1
   eyesLookAtCamera: 0
   eyeLookMaxDegrees: 45
+  faceCurveCatalog: {fileID: 11400000, guid: 39af5be72c2b1aa49a02fa52ed5f0045, type: 2}
 --- !u!95 &2952432883161791761
 Animator:
   serializedVersion: 7
@@ -65964,12 +65984,22 @@ MonoBehaviour:
   - sleepy
   - Slow_Blink
   - Wink
+  - relaxed_enter
+  - relaxed_loop
+  - relaxed_exit
+  - 1_Top-Right_Notification_Standing
+  - 2_Top-Right_Notification_Sitting
+  - 3_General_Notification_Awareness_Standing
+  - 4_Windows_Notification_Bottom-Right_Standing
+  - 5_Windows_Notification_Bottom-Right_Sitting
+  - 6_General_Notification_Awareness_Sitting
   currentIndex: 0
   expectedBrokenStateNames: []
   keepInPlace: 1
   lockEyes: 1
   eyesLookAtCamera: 0
   eyeLookMaxDegrees: 45
+  faceCurveCatalog: {fileID: 11400000, guid: 39af5be72c2b1aa49a02fa52ed5f0045, type: 2}
 --- !u!1 &7334111246635951112
 GameObject:
   m_ObjectHideFlags: 0

@@ -85,6 +85,61 @@ namespace SynthCohost.Tests.EditMode.Development
         }
 
         [Test]
+        public void OverlayLastSaved_PrefersLastGetTokenOverEnvironment()
+        {
+            var fromEnv = LiveTestPlaceholderSource.Resolve(
+                SynthCohostConnectionSettings.DefaultLiveEndpoint,
+                "{\"accessToken\":\"old-file-token\",\"avatarId\":\"11111111-1111-1111-1111-111111111111\"}",
+                null,
+                "environment-token",
+                "22222222-2222-2222-2222-222222222222");
+            var lastSaved = LiveTestPlaceholderSource.Resolve(
+                SynthCohostConnectionSettings.DefaultLiveEndpoint,
+                "{\"accessToken\":\"latest-get-token\",\"refreshToken\":\"latest-refresh\",\"avatarId\":\"11111111-1111-1111-1111-111111111111\"}",
+                null,
+                null,
+                null);
+
+            var applied = LiveTestPlaceholderSource.OverlayLastSaved(fromEnv, lastSaved);
+
+            Assert.That(applied.AccessToken, Is.EqualTo("latest-get-token"));
+            Assert.That(applied.RefreshToken, Is.EqualTo("latest-refresh"));
+            Assert.That(applied.AvatarId, Is.EqualTo("11111111-1111-1111-1111-111111111111"));
+        }
+
+        [Test]
+        public void TryLoadDraftFromPath_ReadsSavedAccessToken()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "SynthCohostLiveTest.local.test.json");
+            try
+            {
+                File.WriteAllText(
+                    path,
+                    "{\"endpointUrl\":\"wss://example.test/ws\"," +
+                    "\"accessToken\":\"saved-play-token\"," +
+                    "\"avatarId\":\"33333333-3333-3333-3333-333333333333\"," +
+                    "\"refreshToken\":\"saved-refresh\"}");
+
+                Assert.That(
+                    LiveTestPlaceholderSource.TryLoadDraftFromPath(
+                        path,
+                        SynthCohostConnectionSettings.DefaultLiveEndpoint,
+                        out var draft),
+                    Is.True);
+                Assert.That(draft.AccessToken, Is.EqualTo("saved-play-token"));
+                Assert.That(draft.RefreshToken, Is.EqualTo("saved-refresh"));
+                Assert.That(draft.AvatarId, Is.EqualTo("33333333-3333-3333-3333-333333333333"));
+            }
+            finally
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+
+        [Test]
         public void EnvironmentValues_OverrideLocalDraftWithoutMutatingFallback()
         {
             const string json =

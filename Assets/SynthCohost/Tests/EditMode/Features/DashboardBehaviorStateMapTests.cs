@@ -34,7 +34,7 @@ namespace SynthCohost.Tests.EditMode.Features
             Assert.That(DashboardBehaviorStateMap.IsLooping(AvatarBehavior.Idle), Is.True);
             Assert.That(DashboardBehaviorStateMap.IsLooping(AvatarBehavior.Listening), Is.True);
             Assert.That(DashboardBehaviorStateMap.IsLooping(AvatarBehavior.Speaking), Is.True);
-            Assert.That(DashboardBehaviorStateMap.Speaking, Is.EqualTo("34_Curious_Lean"));
+            Assert.That(DashboardBehaviorStateMap.Speaking, Is.EqualTo(DashboardBehaviorStateMap.Idle));
             Assert.That(DashboardBehaviorStateMap.Speaking, Is.Not.EqualTo(DashboardBehaviorStateMap.Listening));
             Assert.That(DashboardBehaviorStateMap.IsLooping(AvatarBehavior.Happy), Is.False);
         }

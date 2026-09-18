@@ -11,9 +11,12 @@ namespace SynthCohost.Runtime.Features.Avatar
         public const string Idle = "01_Idle_A_(Breathing)";
         public const string Listening = "Listening";
         public const string Thinking = "53_Thinking";
-        public const string Speaking = "34_Curious_Lean"; // present-to-camera; mouth uses blendshapes + TTS
+        public const string Speaking = Idle; // same breathing idle; mouth uses blendshapes + TTS
         public const string Happy = "46_Smile";
         public const string Celebrate = "48_cheer";
+        public const string RelaxedEnter = "relaxed_enter";
+        public const string RelaxedLoop = "relaxed_loop";
+        public const string RelaxedExit = "relaxed_exit";
 
         public static bool TryGetStateName(AvatarBehavior behavior, out string stateName)
         {

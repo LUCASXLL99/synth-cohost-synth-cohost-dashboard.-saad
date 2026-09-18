@@ -9,6 +9,7 @@ using SynthCohost.Runtime.Diagnostics;
 using SynthCohost.Runtime.Features.AiResponse;
 using SynthCohost.Runtime.Features.Avatar;
 using SynthCohost.Runtime.Features.Errors;
+using SynthCohost.Runtime.Features.Speech;
 using SynthCohost.Runtime.Routing;
 using SynthCohost.Runtime.Session;
 using SynthCohost.Transport;
@@ -52,6 +53,8 @@ namespace SynthCohost.Runtime.Bootstrap
         public RuntimeAuthSession AuthSession => authSession;
         public bool HasRefreshableAuthSession =>
             authSession != null && authSession.HasRefreshToken && authSession.HasAccessCredentials;
+
+        internal AvatarBehaviorControllerBehaviour AvatarController => avatarController;
 
         public Uri EffectiveEndpoint
         {
@@ -350,15 +353,19 @@ namespace SynthCohost.Runtime.Bootstrap
                 ? aiResponseSink
                 : null;
             IAiResponseSink ai = ComposeAiSink(wiredAi, avatar as IAiResponseSink);
-            ISystemErrorSink errors = systemErrorSink != null
+            ISystemErrorSink wiredErrors = systemErrorSink != null
                 ? systemErrorSink
-                : new NullSystemErrorSink();
+                : null;
+            ISystemErrorSink errors = ComposeErrorSink(wiredErrors, avatar as ISystemErrorSink);
+            ISpeechAudioSink speech = avatar as ISpeechAudioSink ?? new NullSpeechAudioSink();
 
             var handlers = new List<IProtocolMessageHandler>
             {
                 new AvatarStateMessageHandler(dialect, avatar, deferredOutbound),
                 new AiResponseMessageHandler(dialect, ai),
-                new SystemErrorMessageHandler(dialect, errors)
+                new SystemErrorMessageHandler(dialect, errors),
+                new SpeechAudioMessageHandler(dialect, speech),
+                new SpeechFailedMessageHandler(dialect, speech)
             };
             var router = new ProtocolMessageRouter(codec, dispatcher, handlers, diagnostics);
             var status = new ConnectionStatusViewModel(dispatcher);
@@ -398,6 +405,26 @@ namespace SynthCohost.Runtime.Bootstrap
             }
 
             return new CompositeAiResponseSink(wired, fromAvatar);
+        }
+
+        private static ISystemErrorSink ComposeErrorSink(ISystemErrorSink wired, ISystemErrorSink fromAvatar)
+        {
+            if (wired == null && fromAvatar == null)
+            {
+                return new NullSystemErrorSink();
+            }
+
+            if (wired == null)
+            {
+                return fromAvatar;
+            }
+
+            if (fromAvatar == null || ReferenceEquals(wired, fromAvatar))
+            {
+                return wired;
+            }
+
+            return new CompositeSystemErrorSink(wired, fromAvatar);
         }
 
         private void EnsureAuthStack()

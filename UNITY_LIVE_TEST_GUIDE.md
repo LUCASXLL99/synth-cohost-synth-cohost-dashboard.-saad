@@ -39,7 +39,7 @@ Do not use the development token or placeholder avatar from `test_ws.sh` against
 8. Watch **State**. A sleeping Render service can remain `Connecting (Waking server...)` for about 50 seconds. Do not click Connect again.
 9. Continue only when the state becomes `Ready`. In deployed v2 this initially means the socket opened and the auth frame was sent; there is no positive `session.ready` response. The panel changes to **backend activity received** after the first valid inbound event.
 10. Enter text under **Transcript**, then click **Send Final**.
-11. Expect inbound `avatar.state` `thinking` and a `state.ack`, then `speaking`, then `ai.response`. Unmute **Game view** audio. Console should include `Reply speech playing through avatar AudioSource`. The mouth follows the audio; it must return to idle when speech ends. Local Happy/Wink/Yawn use blendshape overlays because the FBX face joints are not skinned in Unity.
+11. Expect inbound `avatar.state` `thinking` and a `state.ack`, then `speaking`, then `ai.response`. Unmute **Game view** audio. The panel **Speech** line and Console should show `Waiting for backend speech.audio`. If Render is sending TTS, expect `Inbound speech.audio handled` / `speech.audio playing` and a female Deepgram voice with `mouth_open_M` following mouth-openness frames. If the speech event does not arrive, local Windows TTS starts after about 10 seconds (`Backend speech fallback`). The mouth must return to idle when speech ends. Local Happy/Wink/Yawn use blendshape overlays because the FBX face joints are not skinned in Unity.
 12. Leave the connection open for more than 60 seconds to confirm 20-second heartbeats keep it alive.
 13. Click **Disconnect**, then exit Play Mode.
 

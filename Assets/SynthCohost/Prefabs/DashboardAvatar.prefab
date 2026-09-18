@@ -18826,6 +18826,11 @@ MonoBehaviour:
   keepInPlace: 1
   lockEyes: 1
   drawCaptionOverlay: 1
+  playReplySpeech: 1
+  replySpeechVolume: 1
+  faceCurveCatalog: {fileID: 11400000, guid: 39af5be72c2b1aa49a02fa52ed5f0045, type: 2}
+  enableRelaxedIdle: 1
+  relaxedIdleAfterSeconds: 18
 --- !u!1 &5244536922667933693
 GameObject:
   m_ObjectHideFlags: 0

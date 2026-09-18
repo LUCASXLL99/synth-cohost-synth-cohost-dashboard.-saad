@@ -73,5 +73,16 @@ namespace SynthCohost.Tests.EditMode.Features
             Assert.That(DashboardRigFaceOverlay.PlateauEnvelope(0.5f), Is.EqualTo(1f));
             Assert.That(DashboardRigFaceOverlay.PlateauEnvelope(1f), Is.EqualTo(0f).Within(0.02f));
         }
+
+        [Test]
+        public void ForTalking_OpensJawAndCapsHappySmile()
+        {
+            var talking = DashboardRigFaceOverlay.ForTalking(
+                DashboardRigFaceOverlay.Resolve("46_Smile"),
+                softSmile: true);
+            Assert.That(talking.Smile, Is.EqualTo(DashboardRigFaceOverlay.TalkingSmile));
+            Assert.That(talking.Jaw, Is.GreaterThanOrEqualTo(DashboardRigFaceOverlay.TalkingJawFloor));
+            Assert.That(talking.MouthClose, Is.EqualTo(0f));
+        }
     }
 }

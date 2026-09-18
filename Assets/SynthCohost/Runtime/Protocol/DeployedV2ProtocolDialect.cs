@@ -108,6 +108,22 @@ namespace SynthCohost.Protocol
             return Codec.TryParsePayload(envelope, out payload, out error);
         }
 
+        public bool TryReadSpeechAudio(
+            IncomingEnvelope envelope,
+            out SpeechAudioPayload payload,
+            out ProtocolError error)
+        {
+            return Codec.TryParsePayload(envelope, out payload, out error);
+        }
+
+        public bool TryReadSpeechFailed(
+            IncomingEnvelope envelope,
+            out SpeechFailedPayload payload,
+            out ProtocolError error)
+        {
+            return Codec.TryParsePayload(envelope, out payload, out error);
+        }
+
         private string Create<TPayload>(string eventType, string sessionId, TPayload payload)
         {
             if (!TryCreate(eventType, sessionId, payload, out var json, out var error))

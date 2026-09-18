@@ -33,6 +33,9 @@ namespace SynthCohost.Tests.PlayMode
             Assert.That(Object.FindFirstObjectByType<SynthCohostSafeStatusHud>(), Is.Not.Null);
             Assert.That(Object.FindFirstObjectByType<DashboardAvatarPresenter>(), Is.Not.Null);
             Assert.That(Object.FindFirstObjectByType<DashboardStreamCameraMarker>(), Is.Not.Null);
+            var client = Object.FindFirstObjectByType<SynthCohostClientBehaviour>();
+            var presenter = Object.FindFirstObjectByType<DashboardAvatarPresenter>();
+            Assert.That(client.AvatarController, Is.SameAs(presenter));
         }
     }
 }

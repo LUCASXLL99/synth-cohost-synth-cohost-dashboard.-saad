@@ -21,5 +21,7 @@ namespace SynthCohost.Protocol
         bool TryReadAvatarState(IncomingEnvelope envelope, out AvatarStatePayload payload, out ProtocolError error);
         bool TryReadAiResponse(IncomingEnvelope envelope, out AiResponsePayload payload, out ProtocolError error);
         bool TryReadSystemError(IncomingEnvelope envelope, out SystemErrorPayload payload, out ProtocolError error);
+        bool TryReadSpeechAudio(IncomingEnvelope envelope, out SpeechAudioPayload payload, out ProtocolError error);
+        bool TryReadSpeechFailed(IncomingEnvelope envelope, out SpeechFailedPayload payload, out ProtocolError error);
     }
 }

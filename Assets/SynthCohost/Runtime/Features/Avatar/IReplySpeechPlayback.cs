@@ -4,7 +4,8 @@ using UnityEngine;
 namespace SynthCohost.Runtime.Features.Avatar
 {
     /// <summary>
-    /// Local playback of <c>ai.response</c> text. Not the backend <c>speech.*</c> viseme contract.
+    /// Local playback of <c>ai.response</c> text.
+    /// Optional timed lip-sync track (SAPI visemes or approximate text schedule).
     /// </summary>
     internal interface IReplySpeechPlayback
     {
@@ -15,5 +16,10 @@ namespace SynthCohost.Runtime.Features.Avatar
         void Cancel();
 
         void Tick(AudioSource output);
+
+        /// <summary>
+        /// Samples mouth shapes for the current playback time when a viseme track exists.
+        /// </summary>
+        bool TrySampleLipSync(AudioSource output, out LipSyncPose pose);
     }
 }

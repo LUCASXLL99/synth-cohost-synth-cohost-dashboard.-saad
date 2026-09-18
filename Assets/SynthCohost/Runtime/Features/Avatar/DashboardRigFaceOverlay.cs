@@ -10,9 +10,11 @@ namespace SynthCohost.Runtime.Features.Avatar
     /// </summary>
     public static class DashboardRigFaceOverlay
     {
-        internal const float RestMouthClose = 0f;
-        internal const float FullBlink = 60f;
-        internal const float SleepyBlink = 42f;
+        public const float RestMouthClose = 0f;
+        public const float FullBlink = 60f;
+        public const float SleepyBlink = 42f;
+        internal const float TalkingSmile = 12f;
+        internal const float TalkingJawFloor = 12f;
 
         public static int ApplyForAnimatorState(
             SkinnedMeshRenderer[] renderers,
@@ -29,15 +31,40 @@ namespace SynthCohost.Runtime.Features.Avatar
             float normalizedTime,
             bool clipFinished)
         {
-            var pose = Resolve(stateName);
+            return ApplyForAnimatorState(
+                renderers,
+                stateName,
+                audioPeak,
+                normalizedTime,
+                clipFinished,
+                catalog: null);
+        }
+
+        public static int ApplyForAnimatorState(
+            SkinnedMeshRenderer[] renderers,
+            string stateName,
+            float audioPeak,
+            float normalizedTime,
+            bool clipFinished,
+            DashboardFaceCurveCatalog catalog)
+        {
+            FaceOverlayPose pose;
             if (clipFinished)
             {
                 pose = RestPose();
             }
-            else if (IsOneShotExpression(stateName))
+            else if (DashboardFaceCurveSampler.TrySample(catalog, stateName, normalizedTime, out pose))
             {
-                var envelope = PlateauEnvelope(normalizedTime);
-                pose = BlendTowardRest(pose, envelope);
+                // Authored Maya→CC curves already include the envelope.
+            }
+            else
+            {
+                pose = Resolve(stateName);
+                if (IsOneShotExpression(stateName))
+                {
+                    var envelope = PlateauEnvelope(normalizedTime);
+                    pose = BlendTowardRest(pose, envelope);
+                }
             }
 
             return Apply(renderers, pose, audioPeak);
@@ -56,7 +83,9 @@ namespace SynthCohost.Runtime.Features.Avatar
             var jaw = pose.Jaw;
             if (audioPeak > 0.02f)
             {
-                jaw = Mathf.Max(jaw, Mathf.Lerp(4f, 16f, Mathf.Clamp01(audioPeak * 4f)));
+                // Fallback only — viseme phonemes already open the mouth. 32–62
+                // on mouth_open_M is why this rig looked over-open.
+                jaw = Mathf.Max(jaw, Mathf.Lerp(6f, 16f, Mathf.Clamp01(audioPeak)));
             }
 
             var mouthClose = pose.MouthClose;
@@ -96,7 +125,7 @@ namespace SynthCohost.Runtime.Features.Avatar
             return new FaceOverlayPose { MouthClose = RestMouthClose };
         }
 
-        internal static float PlateauEnvelope(float normalizedTime)
+        public static float PlateauEnvelope(float normalizedTime)
         {
             var t = Mathf.Clamp01(normalizedTime);
             if (t < 0.12f)
@@ -112,7 +141,7 @@ namespace SynthCohost.Runtime.Features.Avatar
             return 1f;
         }
 
-        internal static bool IsOneShotExpression(string stateName)
+        public static bool IsOneShotExpression(string stateName)
         {
             if (string.IsNullOrEmpty(stateName))
             {
@@ -133,7 +162,7 @@ namespace SynthCohost.Runtime.Features.Avatar
                    n.Contains("shock");
         }
 
-        internal static FaceOverlayPose Resolve(string stateName)
+        public static FaceOverlayPose Resolve(string stateName)
         {
             if (string.IsNullOrEmpty(stateName))
             {
@@ -227,6 +256,30 @@ namespace SynthCohost.Runtime.Features.Avatar
             }
 
             return RestPose();
+        }
+
+        internal static FaceOverlayPose ForTalking(FaceOverlayPose hold, bool softSmile)
+        {
+            return ForTalking(hold, softSmile, forceJawFloor: true);
+        }
+
+        /// <param name="forceJawFloor">
+        /// When false, leave jaw to lip-sync visemes (still caps smile / opens lips).
+        /// </param>
+        internal static FaceOverlayPose ForTalking(FaceOverlayPose hold, bool softSmile, bool forceJawFloor)
+        {
+            hold.Smile = softSmile ? TalkingSmile : Mathf.Min(hold.Smile, TalkingSmile);
+            if (forceJawFloor)
+            {
+                hold.Jaw = Mathf.Max(hold.Jaw, TalkingJawFloor);
+            }
+            else
+            {
+                hold.Jaw = 0f;
+            }
+
+            hold.MouthClose = 0f;
+            return hold;
         }
 
         private static FaceOverlayPose BlendTowardRest(FaceOverlayPose pose, float envelope)
@@ -349,12 +402,12 @@ namespace SynthCohost.Runtime.Features.Avatar
             };
         }
 
-        private static bool IsBodyFaceRenderer(SkinnedMeshRenderer renderer)
+        internal static bool IsBodyFaceRenderer(SkinnedMeshRenderer renderer)
         {
             return renderer != null && renderer.name == "Full_Body";
         }
 
-        private static bool IsInnerMouthRenderer(SkinnedMeshRenderer renderer)
+        internal static bool IsInnerMouthRenderer(SkinnedMeshRenderer renderer)
         {
             if (renderer == null)
             {

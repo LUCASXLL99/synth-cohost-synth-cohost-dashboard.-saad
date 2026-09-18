@@ -118,6 +118,36 @@ namespace SynthCohost.Tests.EditMode.Development
         }
 
         [Test]
+        public void SpeechAudioReceived_LogsSafeMetadataWithoutPayload()
+        {
+            const string secret = "SECRET_AUDIO_BYTES";
+            var diagnostics = new LiveTestConnectionDiagnostics(null);
+            const string expected =
+                "[SynthCohost/LiveTest] Inbound speech.audio handled; seq=2; format=mp3; " +
+                "bytes=19400; frames=12; final=yes; audio payload hidden.";
+            LogAssert.Expect(LogType.Log, expected);
+
+            diagnostics.SpeechAudioReceived(2, "mp3", 19400, 12, true);
+
+            Assert.That(diagnostics.Snapshot().Single().Message, Does.Not.Contain(secret));
+        }
+
+        [Test]
+        public void SpeechFailedReceived_NormalizesUntrustedCode()
+        {
+            const string raw = "BAD\nSECRET";
+            var diagnostics = new LiveTestConnectionDiagnostics(null);
+            const string expected =
+                "[SynthCohost/LiveTest] Inbound speech.failed handled; " +
+                "code=UNRECOGNIZED_SYSTEM_ERROR; using local TTS fallback.";
+            LogAssert.Expect(LogType.Warning, expected);
+
+            diagnostics.SpeechFailedReceived(raw);
+
+            Assert.That(diagnostics.Snapshot().Single().Message, Does.Not.Contain(raw));
+        }
+
+        [Test]
         public void ActivityBuffer_IsBounded()
         {
             var diagnostics = new LiveTestConnectionDiagnostics(null);

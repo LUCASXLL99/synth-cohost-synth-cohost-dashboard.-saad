@@ -26,6 +26,25 @@ namespace SynthCohost.Protocol
         public const string AvatarState = "avatar.state";
         public const string AiResponse = "ai.response";
         public const string SystemError = "system.error";
+        public const string SpeechAudio = "speech.audio";
+        public const string SpeechFailed = "speech.failed";
+
+        /// <summary>
+        /// Planned speech events that are not handled yet. Logged as a canned line.
+        /// </summary>
+        public static bool IsReservedUnimplementedSpeechEvent(string eventType)
+        {
+            switch (eventType)
+            {
+                case "speech.start":
+                case "speech.end":
+                case "speech.viseme":
+                case "speech.chunk":
+                    return true;
+                default:
+                    return false;
+            }
+        }
 
         public static bool IsKnown(string eventType)
         {
@@ -54,6 +73,8 @@ namespace SynthCohost.Protocol
                 case AvatarState:
                 case AiResponse:
                 case SystemError:
+                case SpeechAudio:
+                case SpeechFailed:
                     return true;
                 default:
                     return false;

@@ -128,7 +128,7 @@ namespace SynthCohost.Editor
         {
             var serialized = new SerializedObject(client);
             serialized.FindProperty("settings").objectReferenceValue = settings;
-            serialized.FindProperty("avatarController").objectReferenceValue = avatar;
+            serialized.FindProperty("avatarController").objectReferenceValue = null;
             serialized.FindProperty("aiResponseSink").objectReferenceValue = ai;
             serialized.FindProperty("systemErrorSink").objectReferenceValue = errors;
             serialized.ApplyModifiedPropertiesWithoutUndo();

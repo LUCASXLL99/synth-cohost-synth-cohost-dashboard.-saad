@@ -67,10 +67,21 @@ namespace SynthCohost.Runtime.Routing
 
             if (!handlers.TryGetValue(envelope.EventType, out var handler))
             {
-                diagnostics.Write(
-                    DiagnosticLogLevel.Verbose,
-                    "Protocol",
-                    "Ignored an unhandled event type; the untrusted identifier was not logged.");
+                if (ProtocolEventTypes.IsReservedUnimplementedSpeechEvent(envelope.EventType))
+                {
+                    diagnostics.Write(
+                        DiagnosticLogLevel.Information,
+                        "Protocol",
+                        "Ignored reserved speech.* frame; speech.audio / speech.failed are handled separately.");
+                }
+                else
+                {
+                    diagnostics.Write(
+                        DiagnosticLogLevel.Verbose,
+                        "Protocol",
+                        "Ignored an unhandled event type; the untrusted identifier was not logged.");
+                }
+
                 return new ProtocolRouteResult(
                     ProtocolRouteStatus.IgnoredUnknown,
                     envelope.EventType,
