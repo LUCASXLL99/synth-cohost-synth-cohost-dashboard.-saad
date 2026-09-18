@@ -116,3 +116,7 @@ InitTestScene*.unity*
 /Assets/3D Models/**/*.rar.meta
 
 # v008 FBX (>100MB) is tracked with Git LFS; jacket/shoe normals are tracked as regular Git blobs (<100MB)
+
+# Markdown stays local — do not commit or push .md files
+*.md
+*.md.meta
