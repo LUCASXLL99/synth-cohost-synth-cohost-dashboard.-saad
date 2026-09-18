@@ -120,3 +120,8 @@ InitTestScene*.unity*
 # Markdown stays local — do not commit or push .md files
 *.md
 *.md.meta
+
+# Python bytecode (never commit)
+__pycache__/
+*.py[cod]
+
