@@ -117,9 +117,10 @@ InitTestScene*.unity*
 
 # v008 FBX (>100MB) is tracked with Git LFS; jacket/shoe normals are tracked as regular Git blobs (<100MB)
 
-# Markdown stays local — do not commit or push .md files
+# Markdown stays local except the root README on the shared remote
 *.md
 *.md.meta
+!/README.md
 
 # Python bytecode (never commit)
 __pycache__/
